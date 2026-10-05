@@ -1,0 +1,19 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <link rel="stylesheet" href="{% static 'order/css/bootstrap.min.css' %}">
+    <title>{{ title }}</title>
+</head>
+<body>
+    {% csrf_token %}
+    {% block mainmenu %}
+    {% endblock %}
+
+    {% block content %}
+    {% endblock %}
+
+    <script src="{% static 'order/js/bootstrap.bundle.min.js' %}"></script>
+</body>
+</html>

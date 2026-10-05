@@ -1,0 +1,210 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block mainmenu %}
+<header class="p-3 text-bg-light">
+    <div class="d-flex flex-wrap align-items-center justify-content-center justify-content-lg-start gap-3">
+
+        <div id="breadcrumbs-container" class="me-lg-auto">
+            {% include 'order/partials/_breadcrumbs.html' with breadcrumbs=breadcrumbs %}
+        </div>
+
+        <div class="text-end d-flex gap-3">
+            <button type="button"
+                    id="btn-sync-courses"
+                    class="btn btn-outline-primary">
+                <span id="btn-sync-courses-spinner"
+                      class="spinner-border spinner-border-sm me-2 d-none"
+                      role="status" aria-hidden="true"></span>
+                <span id="btn-sync-courses-label">Обновить курсы</span>
+            </button>
+
+            <button type="button"
+                    id="btn-sync-users"
+                    class="btn btn-outline-primary">
+                <span id="btn-sync-users-spinner"
+                      class="spinner-border spinner-border-sm me-2 d-none"
+                      role="status" aria-hidden="true"></span>
+                <span id="btn-sync-users-label">Обновить пользователей</span>
+            </button>
+        </div>
+    </div>
+</header>
+{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+
+    {# ---------- Список папок ---------- #}
+    <div id="folder-list">
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Загрузка…</span>
+            </div>
+            <div class="text-muted mt-3">Загрузка данных из iSpring...</div>
+        </div>
+    </div>
+
+    {# ---------- Список пользователей ---------- #}
+    <div id="toast-container"
+         class="toast-container position-fixed bottom-0 end-0 p-3"
+         style="z-index: 1080;"></div>
+    <div id="user-list" class="mt-4">
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Загрузка…</span>
+            </div>
+            <div class="text-muted mt-3">Загрузка пользователей...</div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+(function () {
+    // ---------- Папки ----------
+    const btnCourses        = document.getElementById('btn-sync-courses');
+    const spinnerCourses    = document.getElementById('btn-sync-courses-spinner');
+    const labelCourses      = document.getElementById('btn-sync-courses-label');
+    const listEl            = document.getElementById('folder-list');
+    const crumbsEl          = document.getElementById('breadcrumbs-container');
+
+    // ---------- Пользователи ----------
+    const btnUsers          = document.getElementById('btn-sync-users');
+    const spinnerUsers      = document.getElementById('btn-sync-users-spinner');
+    const labelUsers        = document.getElementById('btn-sync-users-label');
+    const userListEl   = document.getElementById('user-list');
+
+    const toastContainer = document.getElementById('toast-container');
+    function showToast(message, type) {
+        const bgClass = {
+            success: 'text-bg-success',
+            danger:  'text-bg-danger',
+            info:    'text-bg-primary',
+        }[type] || 'text-bg-secondary';
+
+        const toastEl = document.createElement('div');
+        toastEl.className = `toast align-items-center ${bgClass} border-0`;
+        toastEl.setAttribute('role', 'alert');
+        toastEl.setAttribute('aria-live', 'assertive');
+        toastEl.setAttribute('aria-atomic', 'true');
+        toastEl.innerHTML = `
+            <div class="d-flex">
+                <div class="toast-body">${message}</div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto"
+                        data-bs-dismiss="toast" aria-label="Закрыть"></button>
+            </div>
+        `;
+        toastContainer.appendChild(toastEl);
+        const toast = new bootstrap.Toast(toastEl, { delay: 10000 });
+        toast.show();
+        toastEl.addEventListener('hidden.bs.toast', () => toastEl.remove());
+    }
+
+    function getCsrfToken() {
+        const match = document.cookie.match(/csrftoken=([^;]+)/);
+        return match ? match[1] : '';
+    }
+
+    // ---------- Загрузка папок ----------
+    function loadFolderItems() {
+        const url = new URL(window.location.href);
+        const itemId = url.searchParams.get('item_id') || '';
+
+        return fetch(`/partial/folder-items/?item_id=${encodeURIComponent(itemId)}`, {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (!data.ok) {
+                listEl.innerHTML =
+                    `<div class="alert alert-danger mt-3">${data.error}</div>`;
+                return;
+            }
+            if (data.synced) {
+                showToast(`Данные из iSpring загружены`, 'success');
+            }
+            listEl.innerHTML = data.html;
+            if (data.breadcrumbs_html !== undefined) {
+                crumbsEl.innerHTML = data.breadcrumbs_html;
+            }
+        });
+    }
+
+    // ---------- Загрузка пользователей ----------
+    function loadUsers() {
+        return fetch('/partial/users/', {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        })
+        .then(r => r.json())
+        .then(data => {
+            userListEl.innerHTML = '';
+            if (!data.ok) {
+                showToast('Ошибка загрузки пользователей: ' + (data.error || 'неизвестная'), 'danger');
+                return;
+            }
+            if (data.synced) {
+                showToast(`Пользователи из iSpring загружены: ${data.count}`, 'success');
+            }
+        })
+        .catch(err => showToast('Ошибка сети: ' + err.message, 'danger'));
+    }
+
+    // ---------- Автозагрузка при открытии ----------
+    loadFolderItems();
+    loadUsers();
+
+    // ---------- Кнопка "Обновить курсы" ----------
+    btnCourses.addEventListener('click', function () {
+        btnCourses.disabled = true;
+        spinnerCourses.classList.remove('d-none');
+        labelCourses.textContent = 'Обновление…';
+
+        fetch('/sync/courses/', {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': getCsrfToken(),
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (!data.ok) { alert('Ошибка: ' + (data.error || 'неизвестная')); return; }
+            return loadFolderItems();
+        })
+        .catch(err => alert('Ошибка сети: ' + err.message))
+        .finally(() => {
+            btnCourses.disabled = false;
+            spinnerCourses.classList.add('d-none');
+            labelCourses.textContent = 'Обновить курсы';
+        });
+    });
+
+    // ---------- Кнопка "Обновить пользователей" ----------
+    btnUsers.addEventListener('click', function () {
+        btnUsers.disabled = true;
+        spinnerUsers.classList.remove('d-none');
+        labelUsers.textContent = 'Обновление…';
+
+        fetch('/sync/users/', {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': getCsrfToken(),
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (!data.ok) { alert('Ошибка: ' + (data.error || 'неизвестная')); return; }
+            showToast(`Пользователи загружены: ${data.count}`, 'success');
+        })
+        .catch(err => alert('Ошибка сети: ' + err.message))
+        .finally(() => {
+            btnUsers.disabled = false;
+            spinnerUsers.classList.add('d-none');
+            labelUsers.textContent = 'Обновить пользователей';
+        });
+    });
+})();
+</script>
+{% endblock %}

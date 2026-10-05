@@ -1,0 +1,62 @@
+{% load static %}
+
+<div class="list-group">
+    {% for item in items %}
+        <div class="list-group-item list-group-item-action d-flex align-items-center position-relative">
+
+            {# Растянутая ссылка — делает кликабельной всю карточку #}
+            {% if item.type == 'Folder' %}
+                <a href="?item_id={{ item.id }}"
+                   class="stretched-link text-decoration-none text-reset"></a>
+            {% elif item.type == 'LearningTrack' %}
+                <a href="{% url 'track_detail' item.id %}"
+                   class="stretched-link text-decoration-none text-reset"></a>
+            {% endif %}
+
+            {# ---------- Иконка ---------- #}
+            {% if item.type == 'Folder' %}
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"
+                     fill="currentColor"
+                     class="bi bi-folder-fill text-warning me-3 flex-shrink-0"
+                     viewBox="0 0 16 16">
+                    <path d="M9.828 3h3.982a2 2 0 0 1 1.992 2.181l-.637 7A2 2 0 0 1 13.174 14H2.826a2 2 0 0 1-1.991-1.819l-.637-7a2 2 0 0 1 .342-1.31L.5 3a2 2 0 0 1 2-2h3.672a2 2 0 0 1 1.414.586l.828.828A2 2 0 0 0 9.828 3zm-8.322.12q.322-.119.684-.12h5.396l-.707-.707A1 1 0 0 0 6.172 2H2.5a1 1 0 0 0-1 .981z"/>
+                </svg>
+            {% elif item.type == 'LearningTrack' %}
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"
+                     fill="currentColor"
+                     class="bi bi-signpost-2-fill text-primary me-3 flex-shrink-0"
+                     viewBox="0 0 16 16">
+                    <path d="M8 16.016a7.5 7.5 0 0 0 1.962-14.74A1 1 0 0 0 9 0H7a1 1 0 0 0-.962 1.276A7.5 7.5 0 0 0 8 16.016m6.5-7.5a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0"/>
+                    <path d="m6.94 7.44 4.95-2.83-2.83 4.95-4.949 2.83 2.828-4.95z"/>
+                </svg>
+            {% endif %}
+
+            {# ---------- Название ---------- #}
+            <div class="flex-grow-1 text-truncate" title="{{ item.title }}">
+                {{ item.title }}
+            </div>
+
+            {# ---------- Дата (только у траекторий) ---------- #}
+            {% if item.type == 'LearningTrack' and item.added_date %}
+                <span class="text-muted small ms-3 flex-shrink-0">
+                    {{ item.added_date|slice:":10" }}
+                </span>
+            {% endif %}
+
+            {# ---------- Кнопка (только у траекторий) ---------- #}
+            {% if item.type == 'LearningTrack' and item.view_url %}
+                <a href="{{ item.view_url }}"
+                   target="_blank"
+                   rel="noopener noreferrer"
+                   class="btn btn-sm btn-outline-primary ms-3 flex-shrink-0 position-relative"
+                   style="z-index: 2;">
+                    Открыть в iSpring
+                </a>
+            {% endif %}
+        </div>
+    {% empty %}
+        <div class="list-group-item text-center text-muted py-4">
+            Папок и траекторий нет
+        </div>
+    {% endfor %}
+</div>

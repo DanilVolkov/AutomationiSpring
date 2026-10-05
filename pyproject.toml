@@ -1,0 +1,21 @@
+[project]
+name = "automationispring"
+version = "0.1.0"
+requires-python = ">=3.14"
+dependencies = [
+    "django>=6.1.1",
+    "django-debug-toolbar>=8.0.0",
+    "environs>=15.2.0",
+    "requests>=2.34.2",
+    "ruff>=0.16.9",
+]
+
+[tool.ruff]
+line-length = 79
+preview = true
+
+[tool.ruff.format]
+quote-style = "single"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "B", "DJ"]

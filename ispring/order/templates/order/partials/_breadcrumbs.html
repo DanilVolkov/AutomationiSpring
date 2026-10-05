@@ -1,0 +1,32 @@
+{% load static %}
+
+<nav aria-label="breadcrumb">
+    <ol class="breadcrumb breadcrumb-chevron bg-body-tertiary rounded-3 mb-0 py-2 px-3">
+
+        {# ---------- Домик (всегда) ---------- #}
+        <li class="breadcrumb-item">
+            <a class="link-body-emphasis" href="/">
+                <img src="{% static 'order/images/house-door-fill.svg' %}"
+                     alt="Home" width="16" height="16">
+                <span class="visually-hidden">Home</span>
+            </a>
+        </li>
+
+        {# ---------- Промежуточные папки ---------- #}
+        {% for crumb in breadcrumbs %}
+            <li class="breadcrumb-item {% if forloop.last %}active{% endif %}"
+                {% if forloop.last %}aria-current="page"{% endif %}>
+
+                {% if forloop.last %}
+                    {{ crumb.title }}
+                {% else %}
+                    <a class="link-body-emphasis fw-semibold text-decoration-none"
+                       href="/?item_id={{ crumb.id }}">
+                        {{ crumb.title }}
+                    </a>
+                {% endif %}
+            </li>
+        {% endfor %}
+
+    </ol>
+</nav>

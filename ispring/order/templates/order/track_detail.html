@@ -1,0 +1,87 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block mainmenu %}
+<header class="p-3 text-bg-light">
+    <div class="d-flex flex-wrap align-items-center justify-content-center justify-content-lg-start gap-3">
+
+        <div id="breadcrumbs-container" class="me-lg-auto">
+            {% include 'order/partials/_breadcrumbs.html' with breadcrumbs=breadcrumbs %}
+        </div>
+
+        <div class="text-end d-flex gap-3">
+            <button type="button"
+                    id="btn-sync-courses"
+                    class="btn btn-outline-primary">
+                <span id="btn-sync-courses-spinner"
+                      class="spinner-border spinner-border-sm me-2 d-none"
+                      role="status" aria-hidden="true"></span>
+                <span id="btn-sync-courses-label">Загрузить отчет из IVA</span>
+            </button>
+
+            <button type="button"
+                    id="btn-sync-users"
+                    class="btn btn-outline-primary">
+                <span id="btn-sync-users-spinner"
+                      class="spinner-border spinner-border-sm me-2 d-none"
+                      role="status" aria-hidden="true"></span>
+                <span id="btn-sync-users-label">Скачать таблицу</span>
+            </button>
+        </div>
+    </div>
+</header>
+{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+
+    <div id="track-detail">
+
+        {# ---------- Спиннер ---------- #}
+        <div id="track-loading" class="text-center py-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Загрузка...</span>
+            </div>
+            <div class="text-muted mt-3">Загрузка данных траектории...</div>
+        </div>
+
+    </div>
+
+</div>
+
+<script>
+(function () {
+    const container = document.getElementById('track-detail');
+    const crumbsEl = document.getElementById('breadcrumbs-container');
+    const trackId = "{{ track_id|escapejs }}";
+
+    fetch(`/partial/track/${encodeURIComponent(trackId)}/`, {
+        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (!data.ok) {
+            container.innerHTML =
+                `<div class="alert alert-danger mt-3" role="alert">
+                     Не удалось загрузить данные: ${data.error}
+                     <button class="btn btn-sm btn-outline-danger ms-3"
+                             onclick="window.location.reload()">Повторить</button>
+                 </div>`;
+            return;
+        }
+        container.innerHTML = data.html;
+        if (data.breadcrumbs_html !== undefined) {
+            crumbsEl.innerHTML = data.breadcrumbs_html;
+        }
+    })
+    .catch(err => {
+        container.innerHTML =
+            `<div class="alert alert-danger mt-3" role="alert">
+                 Ошибка сети: ${err.message}
+                 <button class="btn btn-sm btn-outline-danger ms-3"
+                         onclick="window.location.reload()">Повторить</button>
+             </div>`;
+    });
+})();
+</script>
+{% endblock %}
