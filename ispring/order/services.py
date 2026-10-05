@@ -1,6 +1,8 @@
 import functools
+import json
 import time
 from collections import defaultdict
+from dataclasses import asdict
 from datetime import datetime
 from functools import lru_cache
 
@@ -103,7 +105,6 @@ class IspringApi:
             )
         )
         self.items_tree = defaultdict(list)
-        items_tree_with_courses = defaultdict(list)
         for item in items:
             if item.get('type') == 'LearningTrack':
                 self._all_items_info[item['itemId']] = LearningTrack(
@@ -131,17 +132,8 @@ class IspringApi:
                     parent_id=item['parentId'],
                 )
 
-            if 'parentId' in item:
-                items_tree_with_courses[item['parentId']].append(item['itemId'])
-                if item['type'] != 'Course':
+            if 'parentId' in item and item['type'] != 'Course':
                     self.items_tree[item['parentId']].append(item['itemId'])
-
-        # for k, v in self.items_tree.items():
-        #     print(f'k={self._all_items_info[k].title}', end=' ')
-        #     print('v=[', end='')
-        #     for el in v:
-        #         print(self._all_items_info[el].title, end=', ')
-        #     print(']')
 
         # Отбор только тех данных, что есть в папке ISPRING_DEFAULT_FOLDER_ID
 
@@ -164,21 +156,33 @@ class IspringApi:
                         and item_id not in self.items_tree  # папка пустая
                     ):
                         items_no_empty[k].append(item_id)
+                        if isinstance(item, LearningTrack):
+                            self._learning_track_ids.append(item.id)
+
 
             self.items_tree = items_no_empty
 
-            # Дополнение структуры
-            for item_id, child_ids in items_tree_with_courses.items():
-                item = self._all_items_info[item_id]
-                childs = list(map(lambda x: self._all_items_info[x], child_ids))
-                if isinstance(item, Folder):
-                    item.items = childs
-                elif isinstance(item, LearningTrack):
-                    item.courses = childs
         else:
             raise KeyError(f'Папки с id={ISPRING_DEFAULT_FOLDER_ID} не существует')
 
-            # self._get_learning_track_courses()
+
+        track_courses = self._get_learning_track_courses()
+
+        # Дополнение структуры
+        for folder_id, id_childs in self.items_tree.items():
+            folder = self._all_items_info.get(folder_id)
+            if isinstance(folder, Folder):
+                folder.items = list(
+                    map(lambda x: self._all_items_info[x], id_childs)
+                )
+
+        for track_id, id_courses in track_courses.items():
+            track = self._all_items_info[track_id]
+            courses = list(map(lambda x: self._all_items_info[x], id_courses))
+            track.courses = courses
+
+        # with open("get_courses_tree.json", "w", encoding="utf-8") as f:
+        #     json.dump({k: asdict(v) for k, v in self._all_items_info.items()}, f, ensure_ascii=False, indent=4)
 
     @request_with_token
     def _get_courses_tree(self):
@@ -252,55 +256,47 @@ class IspringApi:
 
         return users
 
-    # @request_with_token
-    # def _get_learning_track_courses(self):
-    #     url = f'{self._host}/api/v2/learning_track/courses'
-    #     headers = {
-    #         'Authorization': self._token,
-    #         'Accept': 'application/json',
-    #     }
-    #
-    #     for i in range(0, len(self._learning_track_ids), 50):
-    #         batch = self._learning_track_ids[i: i + 50]
-    #         params = {"learningTrackIds": ",".join(batch)}
-    #
-    #         response = requests.get(url, headers=headers, params=params, timeout=30)
-    #         response.raise_for_status()
-    #         tracks_data = response.json()
-    #         for item in tracks_data:
-    #             if item['learningTrackId'] in self._all_items_info:
-    #                 if 'courses' in self._all_items_info[item['learningTrackId']]:
-    #                     self._all_items_info[item['learningTrackId']]['courses'][item['courseId']] = {}
-    #                 else:
-    #                     self._all_items_info[item['learningTrackId']]['courses'] = {}
+    @request_with_token
+    def _get_learning_track_courses(self):
+        url = f'{self._host}/api/v2/learning_track/courses'
+        headers = {
+            'Authorization': self._token,
+            'Accept': 'application/json',
+        }
+        result = defaultdict(list)
+        for i in range(0, len(self._learning_track_ids), 50):
+            batch = self._learning_track_ids[i: i + 50]
+            params = {"learningTrackIds": ",".join(batch)}
 
+            response = requests.get(url, headers=headers, params=params, timeout=30)
+            response.raise_for_status()
+            tracks_data = response.json()
+            for item in tracks_data:
+                result[item['learningTrackId']].append(item['courseId'])
+            time.sleep(0.1)
+        return result
 
     def get_data_courses(self, learning_track_id):
-        track_lessons = self._get_courses(learning_track_id)
+        courses = self._all_items_info[learning_track_id].courses
+        id_courses = list(map(lambda x: x.id, courses))
+        results = self._get_lessons_and_materials_results(id_courses)['results']
 
-        lessons_info = track_lessons.get('modules')
-
-        if not lessons_info:
-            return None
-
-        lessons_materials = None
-
-        for lesson_info in lessons_info:
-            lesson = self._all_items_info[learning_track_id]['courses'][lesson_info['courseId']]
-            lesson.clear()
-            lesson['id'] = lesson_info.get('moduleId', '')
-            lesson['title'] = lesson_info.get('title', '')
-            lesson['viewUrl'] = lesson_info.get('viewUrl', '')
-            lesson['materials'] = {}
-
-
-
-
-
+        with open("data_courses.json", "w", encoding="utf-8") as f:
+            json.dump(results, f, ensure_ascii=False, indent=4)
 
     @request_with_token
-    def _get_data_lessons(self, learning_track_id):
-        pass
+    def _get_lessons_and_materials_results(self, courses_id):
+        url = f'{self._host}/learners/modules/results'
+        headers = {
+            'Authorization': self._token,
+            'Accept': 'application/json',
+        }
+        params = {
+            "courseIds[]": courses_id,
+        }
+        response = requests.get(url, headers=headers, params=params, timeout=30)
+        response.raise_for_status()
+        return response.json()
 
 
     @request_with_token
