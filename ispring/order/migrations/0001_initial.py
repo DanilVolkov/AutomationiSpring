@@ -4,22 +4,48 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     initial = True
 
-    dependencies = [
-    ]
+    dependencies = []
 
     operations = [
         migrations.CreateModel(
             name='User',
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                (
+                    'id',
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name='ID',
+                    ),
+                ),
                 ('user_id', models.UUIDField(verbose_name='ID пользователя')),
-                ('first_name', models.CharField(blank=True, max_length=255, verbose_name='Имя')),
-                ('last_name', models.CharField(blank=True, max_length=255, verbose_name='Фамилия')),
-                ('patronymic', models.CharField(blank=True, max_length=255, verbose_name='Отчество')),
-                ('email', models.CharField(blank=True, max_length=255, verbose_name='Почта')),
+                (
+                    'first_name',
+                    models.CharField(
+                        blank=True, max_length=255, verbose_name='Имя'
+                    ),
+                ),
+                (
+                    'last_name',
+                    models.CharField(
+                        blank=True, max_length=255, verbose_name='Фамилия'
+                    ),
+                ),
+                (
+                    'patronymic',
+                    models.CharField(
+                        blank=True, max_length=255, verbose_name='Отчество'
+                    ),
+                ),
+                (
+                    'email',
+                    models.CharField(
+                        blank=True, max_length=255, verbose_name='Почта'
+                    ),
+                ),
             ],
             options={
                 'ordering': ['last_name', 'first_name', 'patronymic'],

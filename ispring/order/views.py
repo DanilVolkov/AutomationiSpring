@@ -4,10 +4,10 @@ from django.template.loader import render_to_string
 from django.views import View
 from django.views.generic import TemplateView
 from ispring.settings import ISPRING_DEFAULT_FOLDER_ID
+
 from order.models import User
-
 from order.services import get_ispring_api
-
+from order.utils import Table
 
 # class OrderHome(TemplateView):
 #     template_name = 'order/index.html'
@@ -36,6 +36,7 @@ from order.services import get_ispring_api
 #
 #         return context
 
+
 class OrderHome(TemplateView):
     template_name = 'order/index.html'
 
@@ -44,6 +45,7 @@ class OrderHome(TemplateView):
         context['title'] = 'Главная страница'
         context['breadcrumbs'] = []
         return context
+
 
 class SyncCoursesView(View):
     def post(self, request, *args, **kwargs):
@@ -55,6 +57,7 @@ class SyncCoursesView(View):
         except RuntimeError as e:
             return JsonResponse({'ok': False, 'error': str(e)}, status=502)
 
+
 class SyncUsersView(View):
     def post(self, request, *args, **kwargs):
         try:
@@ -65,7 +68,7 @@ class SyncUsersView(View):
                     first_name=user['first_name'],
                     last_name=user['last_name'],
                     patronymic=user['patronymic'],
-                    email=user['email']
+                    email=user['email'],
                 )
                 for user in users
             ]
@@ -80,6 +83,7 @@ class SyncUsersView(View):
         except RuntimeError as e:
             return JsonResponse({'ok': False, 'error': str(e)}, status=502)
 
+
 class UsersPartialView(View):
     def get(self, request, *args, **kwargs):
         try:
@@ -92,7 +96,7 @@ class UsersPartialView(View):
                         first_name=user['first_name'],
                         last_name=user['last_name'],
                         patronymic=user['patronymic'],
-                        email=user['email']
+                        email=user['email'],
                     )
                     for user in users
                 ]
@@ -102,13 +106,13 @@ class UsersPartialView(View):
             return JsonResponse({
                 'ok': True,
                 'count': User.objects.count(),
-                'synced': synced
+                'synced': synced,
             })
         except RuntimeError as e:
             return JsonResponse({'ok': False, 'error': str(e)}, status=502)
 
-class FolderItemsPartialView(View):
 
+class FolderItemsPartialView(View):
     def get(self, request, *args, **kwargs):
         item_id_raw = request.GET.get('item_id') or ''
         item_id = item_id_raw or ISPRING_DEFAULT_FOLDER_ID
@@ -121,9 +125,7 @@ class FolderItemsPartialView(View):
                 synced = True
 
             items = api.get_folder_items(item_id)
-            breadcrumbs = (
-                api.get_parents_item(item_id) if item_id_raw else []
-            )
+            breadcrumbs = api.get_parents_item(item_id) if item_id_raw else []
 
             list_html = render_to_string(
                 'order/partials/_folder_items.html',
@@ -140,7 +142,7 @@ class FolderItemsPartialView(View):
                 'ok': True,
                 'html': list_html,
                 'breadcrumbs_html': breadcrumbs_html,
-                'synced': synced
+                'synced': synced,
             })
 
         except RuntimeError as e:
@@ -161,10 +163,13 @@ class TrackDetailPartialView(View):
     def get(self, request, track_id, *args, **kwargs):
         try:
             api = get_ispring_api()
-            lessons = api.get_data_courses(track_id)
-            breadcrumbs = (
-                api.get_parents_item(track_id) if track_id else []
-            )
+            learning_track = api.get_data_courses(track_id)
+            # with open("data_results.json", "w", encoding="utf-8") as f:
+            #     json.dump(asdict(learning_track), f, ensure_ascii=False,
+            #     indent=4)
+            breadcrumbs = api.get_parents_item(track_id) if track_id else []
+
+            table_html = Table(learning_track).to_html()
 
             breadcrumbs_html = render_to_string(
                 'order/partials/_breadcrumbs.html',
@@ -175,13 +180,17 @@ class TrackDetailPartialView(View):
             html = render_to_string(
                 'order/partials/_track_detail.html',
                 {
-                    'track': None,
-                    'lessons': lessons,
+                    'learning_track': learning_track,
+                    'table_html': table_html,
                 },
                 request=request,
             )
 
-            return JsonResponse({'ok': True, 'html': html, 'breadcrumbs_html': breadcrumbs_html,})
+            return JsonResponse({
+                'ok': True,
+                'html': html,
+                'breadcrumbs_html': breadcrumbs_html,
+            })
 
         except RuntimeError as e:
             return JsonResponse({'ok': False, 'error': str(e)}, status=502)
