@@ -1,3 +1,6 @@
+import json
+from dataclasses import asdict
+
 from django.db import connection
 from django.http import JsonResponse
 from django.template.loader import render_to_string
@@ -68,7 +71,6 @@ class SyncUsersView(View):
                     first_name=user['first_name'],
                     last_name=user['last_name'],
                     patronymic=user['patronymic'],
-                    email=user['email'],
                 )
                 for user in users
             ]
@@ -164,9 +166,9 @@ class TrackDetailPartialView(View):
         try:
             api = get_ispring_api()
             learning_track = api.get_data_courses(track_id)
-            # with open("data_results.json", "w", encoding="utf-8") as f:
-            #     json.dump(asdict(learning_track), f, ensure_ascii=False,
-            #     indent=4)
+            with open("data_results.json", "w", encoding="utf-8") as f:
+                json.dump(asdict(learning_track), f, ensure_ascii=False,
+                indent=4)
             breadcrumbs = api.get_parents_item(track_id) if track_id else []
 
             table_html = Table(learning_track).to_html()

@@ -88,114 +88,148 @@ class Cell:
     rowspan: int = 1
     skip: bool = False
     css: str = ''
+    note: str = ''
 
 
 class Table:
-    """
-    Превращает LearningTrack в структуры для HTML-таблицы:
-      - header_top    : list[list[Cell]]   — верхняя строка шапки (курсы)
-      - header_bottom : list[Cell]   — нижняя строка шапки (модули × заглушки)
-      - rows          : list[list[Cell]]   — строки данных
-    """
+    module_stub_fields: list[str] = [
+        'Лекция iSpring',
+        'Лекция IVA',
+        'Лекция итог',
+        'ДЗ порог',
+        'ДЗ прогресс',
+        'ДЗ итог'
+    ]
 
-    MODULE_STUB_FIELDS: list[str] = ['Лекция', 'Время', 'ДЗ']
+    item_extensions = (
+        ".mp4",
+        ".avi",
+        ".mkv",
+        ".mov",
+        ".wmv",
+        ".flv",
+        ".webm",
+        ".m4v",
+        ".mpg",
+        ".mpeg",
+        ".3gp",
+        ".3g2",
+        ".ogv",
+        ".ts",
+        ".mts",
+        ".m2ts",
+        ".vob",
+        ".rm",
+        ".rmvb",
+        ".asf",
+        ".divx",
+        ".f4v",
+        ".swf"
+    )
 
     def __init__(
-        self,
-        learning_track: LearningTrack,
-        stub_fields: list[str] | None = None,
+            self,
+            learning_track: LearningTrack,
     ):
         self._track = learning_track
-        self._stub = (
-            list(stub_fields)
-            if stub_fields is not None
-            else list(self.MODULE_STUB_FIELDS)
-        )
 
-    @property
-    def header_top(self) -> list[list[Cell]]:
-        return self._build_header_top()
-
-    @property
-    def header_bottom(self) -> list[Cell]:
-        return self._build_header_bottom()
-
-    @property
-    def rows(self) -> list[list[Cell]]:
-        return self._build_rows()
 
     def to_html(self) -> str:
+        header_bottom, course_cols_nums = self._build_header_bottom()
+        header_top = self._build_header_top(course_cols_nums)
+        rows = self._build_rows()
 
         return render_to_string(
             'order/partials/_track_table.html',
             {
-                'header_top': self.header_top,
-                'header_bottom': self.header_bottom,
-                'rows': self.rows,
+                'header_top': header_top,
+                'header_bottom': header_bottom,
+                'rows': rows,
             },
         )
 
-    def _build_header_top(self) -> list[list[Cell]]:
-        """
-        Верхний уровень шапки:
-          [№(rowspan=2), ФИО(rowspan=2), Course1(colspan=N1)]
-        """
+    def _build_header_top(self, course_cols_nums) -> list[Cell]:
         header: list[Cell] = [
             Cell(value='№', rowspan=2, css='corner'),
             Cell(value='ФИО', rowspan=2, css='corner'),
         ]
 
         for course in self._track.courses:
-            # Сколько колонок займёт курс:
-            # сумма колонок-заглушек по всем модулям курса.
-            colspan = sum(len(self._stub) for _ in course.modules)
-            # Если модулей нет — 1 пустая колонка, чтобы курс не «схлопнулся».
-            colspan = max(colspan, 1)
             header.append(
-                Cell(value=course.title, colspan=colspan, css='course')
+                Cell(value=course.title, colspan=course_cols_nums[course.id], css='course')
             )
 
-        return [header]
+        return header
 
-    def _build_header_bottom(self) -> list[Cell]:
-        """
-        Нижний уровень шапки: для каждого модуля — len(stub) колонок.
-        """
+    def _get_type_item(self, module: Module) -> str:
+        if module.title.endswith(self.item_extensions):
+            return 'video'
+
+        if (
+            module.result_users is not None and
+            len(module.result_users) > 0 and
+            'passing_score' in module.result_users[0] and
+            'awarded_score' in module.result_users[0]
+        ):
+            return 'hw'
+
+        return 'other'
+
+
+    def _build_header_bottom(self) -> tuple[list[Cell], dict[str, int]]:
         header: list[Cell] = []
+        course_cols_nums = {}
         for course in self._track.courses:
+            course_cols_nums[course.id] = 0
             if not course.modules:
                 # Пустой курс — пустая ячейка в нижней шапке.
                 header.append(Cell(value='', css='module-empty'))
+                course_cols_nums[course.id] = 1
                 continue
-            for module in course.modules:
-                for sf in self._stub:
-                    label = (
-                        f'{module.title}'
-                        if not sf
-                        else f'{module.title} — {sf}'
-                    )
-                    header.append(Cell(value=label, css='module'))
-        return header
 
-    def _collect_users(self) -> 'OrderedDict[str, UserResults]':
-        """
-        Все пользователи из всех модулей в порядке первого появления.
-        """
-        users: OrderedDict[str, UserResults] = OrderedDict()
+            is_lecture = False
+            is_hw = False
+            others = []
+            for module in course.modules:
+                module_type = self._get_type_item(module)
+                if module_type == 'video' and not is_lecture:
+                    is_lecture = True
+                elif module_type == 'hw' and not is_hw:
+                    is_hw = True
+                else:
+                    others.append(Cell(value=module.title, css='module'))
+
+            if is_lecture:
+                header.extend(self.item_extensions[:3])
+                course_cols_nums[course.id] += 3
+            if is_hw:
+                header.extend(self.item_extensions[3:])
+                course_cols_nums[course.id] += 3
+            if others:
+                header.extend(others)
+                course_cols_nums[course.id] += len(others)
+
+        return header, course_cols_nums
+
+    def _collect_users(self) -> dict[str, UserResults]:
+        users: dict[str, UserResults] = dict()
         for course in self._track.courses:
             for module in course.modules:
-                for ur in module.result_users:
-                    users.setdefault(ur.user_id, ur)
-        return users
+                for user in module.result_users:
+                    if user.user_id not in users:
+                        users[user.user_id] = user
+        return dict(sorted(
+            users.items(), key=lambda item: (item[1].fio or '').lower()
+        ))
 
     def _build_rows(self) -> list[list[Cell]]:
         users = self._collect_users()
         rows: list[list[Cell]] = []
 
-        for idx, (user_id, ur) in enumerate(users.items(), start=1):
+        for idx, user_id, ur in enumerate(users.items(), start=1):
             row: list[Cell] = [
                 Cell(value=str(idx), css='num'),
-                Cell(value=(ur.fio or '').strip(), css='fio'),
+                Cell(value=(ur.fio or ''), css='fio'),
             ]
 
             for course in self._track.courses:
@@ -205,6 +239,7 @@ class Table:
 
                 for module in course.modules:
                     match = self._find_result(module, user_id)
+                    # нужно как-то понять, какие столбцы для какого курса сформированы
                     for sf in self._stub:
                         row.append(self._make_cell(sf, match))
 

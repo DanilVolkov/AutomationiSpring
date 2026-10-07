@@ -1,23 +1,23 @@
 {% load static %}
 
 {# ---------- Шапка траектории ---------- #}
-<div class="d-flex align-items-start mb-3">
-    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"
-         fill="currentColor"
-         class="bi bi-signpost-2-fill text-primary me-3 flex-shrink-0"
-         viewBox="0 0 16 16">
-        <path d="M8 16.016a7.5 7.5 0 0 0 1.962-14.74A1 1 0 0 0 9 0H7a1 1 0 0 0-.962 1.276A7.5 7.5 0 0 0 8 16.016m6.5-7.5a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0"/>
-        <path d="m6.94 7.44 4.95-2.83-2.83 4.95-4.949 2.83 2.828-4.95z"/>
-    </svg>
-    <div class="flex-grow-1">
-        <h1 class="h4 mb-1">{{ learning_track.title }}</h1>
-        {% if learning_track.added_date %}
-            <div class="text-muted small">
-                Добавлено: {{ learning_track.added_date }}
-            </div>
-        {% endif %}
-    </div>
-</div>
+<!--<div class="d-flex align-items-start mb-3">-->
+<!--    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"-->
+<!--         fill="currentColor"-->
+<!--         class="bi bi-signpost-2-fill text-primary me-3 flex-shrink-0"-->
+<!--         viewBox="0 0 16 16">-->
+<!--        <path d="M8 16.016a7.5 7.5 0 0 0 1.962-14.74A1 1 0 0 0 9 0H7a1 1 0 0 0-.962 1.276A7.5 7.5 0 0 0 8 16.016m6.5-7.5a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0"/>-->
+<!--        <path d="m6.94 7.44 4.95-2.83-2.83 4.95-4.949 2.83 2.828-4.95z"/>-->
+<!--    </svg>-->
+<!--    <div class="flex-grow-1">-->
+<!--        <h1 class="h4 mb-1">{{ learning_track.title }}</h1>-->
+<!--        {% if learning_track.added_date %}-->
+<!--            <div class="text-muted small">-->
+<!--                Добавлено: {{ learning_track.added_date }}-->
+<!--            </div>-->
+<!--        {% endif %}-->
+<!--    </div>-->
+<!--</div>-->
 
 {# ---------- Таблица ---------- #}
 {% if learning_track.courses %}

@@ -77,7 +77,7 @@
     .catch(err => {
         container.innerHTML =
             `<div class="alert alert-danger mt-3" role="alert">
-                 Ошибка сети: ${err.message}
+                 Произошла ошибка: ${err.message}
                  <button class="btn btn-sm btn-outline-danger ms-3"
                          onclick="window.location.reload()">Повторить</button>
              </div>`;

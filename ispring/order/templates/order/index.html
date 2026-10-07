@@ -147,7 +147,7 @@
                 showToast(`Пользователи из iSpring загружены: ${data.count}`, 'success');
             }
         })
-        .catch(err => showToast('Ошибка сети: ' + err.message, 'danger'));
+        .catch(err => showToast('Произошла ошибка: ' + err.message, 'danger'));
     }
 
     // ---------- Автозагрузка при открытии ----------
@@ -158,7 +158,7 @@
     btnCourses.addEventListener('click', function () {
         btnCourses.disabled = true;
         spinnerCourses.classList.remove('d-none');
-        labelCourses.textContent = 'Обновление…';
+        labelCourses.textContent = 'Обновление...';
 
         fetch('/sync/courses/', {
             method: 'POST',
@@ -169,10 +169,10 @@
         })
         .then(r => r.json())
         .then(data => {
-            if (!data.ok) { alert('Ошибка: ' + (data.error || 'неизвестная')); return; }
+            if (!data.ok) { alert('Произошла ошибка: ' + (data.error || 'неизвестная')); return; }
             return loadFolderItems();
         })
-        .catch(err => alert('Ошибка сети: ' + err.message))
+        .catch(err => alert('Произошла ошибка: ' + err.message))
         .finally(() => {
             btnCourses.disabled = false;
             spinnerCourses.classList.add('d-none');
@@ -198,7 +198,7 @@
             if (!data.ok) { alert('Ошибка: ' + (data.error || 'неизвестная')); return; }
             showToast(`Пользователи загружены: ${data.count}`, 'success');
         })
-        .catch(err => alert('Ошибка сети: ' + err.message))
+        .catch(err => alert('Произошла ошибка: ' + err.message))
         .finally(() => {
             btnUsers.disabled = false;
             spinnerUsers.classList.add('d-none');

@@ -144,7 +144,7 @@ class IspringApi:
 
         filtered_items = {}
 
-        def search_children_folder(folder_id) -> dict:
+        def search_children_folder(folder_id):
             if folder_id in self.items_tree:
                 children_ids = self.items_tree[folder_id]
                 for children_id in children_ids:
@@ -219,7 +219,6 @@ class IspringApi:
                 'first_name': fields.get('FIRST_NAME', ''),
                 'last_name': fields.get('LAST_NAME', ''),
                 'patronymic': fields.get('PATRONYMIC', ''),
-                'email': fields.get('EMAIL', ''),
             }
 
             if not cleaned_user['patronymic'] and cleaned_user['first_name']:

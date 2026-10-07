@@ -12,7 +12,6 @@ class User(models.Model):
     patronymic = models.CharField(
         max_length=255, verbose_name='Отчество', blank=True
     )
-    email = models.CharField(max_length=255, verbose_name='Почта', blank=True)
 
     class Meta:
         ordering = ['last_name', 'first_name', 'patronymic']
