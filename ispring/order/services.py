@@ -1,4 +1,5 @@
 import functools
+import json
 import time
 from collections import defaultdict
 from functools import lru_cache
@@ -285,7 +286,7 @@ class IspringApi:
             time.sleep(0.1)
         return result
 
-    def get_data_courses(self, learning_track_id: str) -> LearningTrack:
+    def get_data_courses(self, learning_track_id: str) -> LearningTrack | None:
         """Получение информации о курсах определенной траектории.
 
         Args:
@@ -296,6 +297,8 @@ class IspringApi:
             траектории.
         """
         courses = self._all_items_info[learning_track_id].courses
+        if not courses:
+            return None
         id_courses = list(map(lambda x: x.id, courses))
         results = self._get_lessons_and_materials_results(id_courses)[
             'results'
@@ -312,21 +315,22 @@ class IspringApi:
         users = {}
         modules = {}
         courses = defaultdict(list)
+        with open("data_in_user_results.json", "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+
         for item in data:
             if item['userId'] in users:
                 user = users[item['userId']]
             else:
                 user = User.objects.get(user_id=item['userId'])
                 users[item['userId']] = user
-
+            print(f'completionStaus: {item['completionStatus']}')
+            print(f'status_compliance.get(item["completionStatus"]): {status_compliance.get(item["completionStatus"])}')
+            print(f'status_compliance.get(item["completionStatus"], item["completionStatus"]): {status_compliance.get(item["completionStatus"], item["completionStatus"])}')
             user_results = UserResults(
                 user_id=item['userId'],
-                fio=f'{user.last_name} '
-                f'{user.first_name} '
-                f'{user.patronymic}'.strip(),
-                completion_status=status_compliance.get(
-                    item['completionStatus'], item['completionStatus']
-                ),
+                fio=f'{user.last_name} {user.first_name} {user.patronymic}'.strip(),
+                completion_status=status_compliance.get(item['completionStatus'], item['completionStatus']),
                 progress=item.get('progress'),
                 awarded_score=item.get('awardedScore'),
                 passing_score=item.get('passingScore'),

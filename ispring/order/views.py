@@ -166,13 +166,14 @@ class TrackDetailPartialView(View):
         try:
             api = get_ispring_api()
             learning_track = api.get_data_courses(track_id)
-            with open("data_results.json", "w", encoding="utf-8") as f:
-                json.dump(asdict(learning_track), f, ensure_ascii=False,
-                indent=4)
+            table_html = None
+            if learning_track:
+                with open("data_results.json", "w", encoding="utf-8") as f:
+                    json.dump(asdict(learning_track), f, ensure_ascii=False,
+                    indent=4)
+                table_html = Table(learning_track).to_html()
+
             breadcrumbs = api.get_parents_item(track_id) if track_id else []
-
-            table_html = Table(learning_track).to_html()
-
             breadcrumbs_html = render_to_string(
                 'order/partials/_breadcrumbs.html',
                 {'breadcrumbs': breadcrumbs},

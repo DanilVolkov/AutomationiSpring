@@ -5,9 +5,10 @@
         <table class="table table-sm table-bordered table-hover align-middle track-table mb-0">
 
             <thead class="table-light">
-                {% for hrow in header_top %}
+                {# ---------- Строка 1: курсы ---------- #}
+                {% if header_top %}
                     <tr>
-                        {% for c in hrow %}
+                        {% for c in header_top %}
                             {% if not c.skip %}
                                 <th class="{{ c.css }} text-center align-middle"
                                     {% if c.colspan > 1 %}colspan="{{ c.colspan }}"{% endif %}
@@ -18,8 +19,9 @@
                             {% endif %}
                         {% endfor %}
                     </tr>
-                {% endfor %}
+                {% endif %}
 
+                {# ---------- Строка 2: модули ---------- #}
                 {% if header_bottom %}
                     <tr>
                         {% for c in header_bottom %}

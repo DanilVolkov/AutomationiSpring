@@ -1,4 +1,4 @@
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -75,11 +75,6 @@ class UserResults:
     awarded_score: float | int | None  # только в дз
     passing_score: float | int | None  # только в дз
 
-    def __post_init__(self):
-        self.completion_status = status_compliance.get(
-            self.completion_status, ''
-        )
-
 
 @dataclass
 class Cell:
@@ -135,9 +130,9 @@ class Table:
 
 
     def to_html(self) -> str:
-        header_bottom, course_cols_nums = self._build_header_bottom()
-        header_top = self._build_header_top(course_cols_nums)
-        rows = self._build_rows()
+        header_bottom, course_headers = self._build_header_bottom()
+        header_top = self._build_header_top(course_headers)
+        rows = self._build_rows(course_headers)
 
         return render_to_string(
             'order/partials/_track_table.html',
@@ -148,7 +143,7 @@ class Table:
             },
         )
 
-    def _build_header_top(self, course_cols_nums) -> list[Cell]:
+    def _build_header_top(self, course_headers) -> list[Cell]:
         header: list[Cell] = [
             Cell(value='№', rowspan=2, css='corner'),
             Cell(value='ФИО', rowspan=2, css='corner'),
@@ -156,7 +151,7 @@ class Table:
 
         for course in self._track.courses:
             header.append(
-                Cell(value=course.title, colspan=course_cols_nums[course.id], css='course')
+                Cell(value=course.title, colspan=len(course_headers[course.id]), css='course')
             )
 
         return header
@@ -165,26 +160,38 @@ class Table:
         if module.title.endswith(self.item_extensions):
             return 'video'
 
-        if (
-            module.result_users is not None and
-            len(module.result_users) > 0 and
-            'passing_score' in module.result_users[0] and
-            'awarded_score' in module.result_users[0]
-        ):
-            return 'hw'
+        if module.result_users is not None and len(module.result_users) > 0:
+            is_hw = any(map(
+                lambda x: True if (
+                        x.passing_score is not None and
+                        x.awarded_score is not None
+                ) else False,
+                module.result_users
+            ))
+            if is_hw:
+                return 'hw'
+
+        # if (
+        #     module.result_users is not None and
+        #     len(module.result_users) > 0 and
+        #     module.result_users[0].passing_score is not None and
+        #     module.result_users[0].awarded_score is not None
+        # ):
+        #     return 'hw'
 
         return 'other'
 
 
-    def _build_header_bottom(self) -> tuple[list[Cell], dict[str, int]]:
+    def _build_header_bottom(self) -> tuple[list[Cell], dict[str, list]]:
         header: list[Cell] = []
-        course_cols_nums = {}
+        course_headers: dict[str, list] = defaultdict(list)
+        lecture_headers = tuple(map(lambda x: Cell(value=x, css='module'), self.module_stub_fields[:3]))
+        hw_headers = tuple(map(lambda x: Cell(value=x, css='module'), self.module_stub_fields[3:]))
         for course in self._track.courses:
-            course_cols_nums[course.id] = 0
             if not course.modules:
                 # Пустой курс — пустая ячейка в нижней шапке.
                 header.append(Cell(value='', css='module-empty'))
-                course_cols_nums[course.id] = 1
+                course_headers[course.id].append('')
                 continue
 
             is_lecture = False
@@ -200,16 +207,16 @@ class Table:
                     others.append(Cell(value=module.title, css='module'))
 
             if is_lecture:
-                header.extend(self.item_extensions[:3])
-                course_cols_nums[course.id] += 3
+                header.extend(lecture_headers)
+                course_headers[course.id].extend(lecture_headers)
             if is_hw:
-                header.extend(self.item_extensions[3:])
-                course_cols_nums[course.id] += 3
+                header.extend(hw_headers)
+                course_headers[course.id].extend(hw_headers)
             if others:
                 header.extend(others)
-                course_cols_nums[course.id] += len(others)
+                course_headers[course.id].extend(others)
 
-        return header, course_cols_nums
+        return header, course_headers
 
     def _collect_users(self) -> dict[str, UserResults]:
         users: dict[str, UserResults] = dict()
@@ -222,11 +229,11 @@ class Table:
             users.items(), key=lambda item: (item[1].fio or '').lower()
         ))
 
-    def _build_rows(self) -> list[list[Cell]]:
+    def _build_rows(self, course_headers: dict[str, list]) -> list[list[Cell]]:
         users = self._collect_users()
         rows: list[list[Cell]] = []
 
-        for idx, user_id, ur in enumerate(users.items(), start=1):
+        for idx, (user_id, ur) in enumerate(users.items(), start=1):
             row: list[Cell] = [
                 Cell(value=str(idx), css='num'),
                 Cell(value=(ur.fio or ''), css='fio'),
@@ -238,13 +245,12 @@ class Table:
                     continue
 
                 for module in course.modules:
-                    match = self._find_result(module, user_id)
-                    # нужно как-то понять, какие столбцы для какого курса сформированы
-                    for sf in self._stub:
-                        row.append(self._make_cell(sf, match))
-
+                    user_results = self._find_result(module, user_id)
+                    for header in course_headers[course.id]:
+                        row.append(self._make_cell(header.value, user_results))
+            print(row)
             rows.append(row)
-
+        print(rows)
         return rows
 
     @staticmethod
@@ -255,26 +261,42 @@ class Table:
         return None
 
     @staticmethod
-    def _make_cell(stub_field: str, ur: UserResults | None) -> Cell:
-        """
-        Заглушка: здесь вы подставите свои поля.
-        Пока — грубый маппинг на progress / awarded_score.
-        """
+    def _make_cell(header: str, ur: UserResults | None) -> Cell:
         if ur is None:
-            return Cell(value='—', css='empty')
+            return Cell(value='Нет результата', css='empty')
 
-        if stub_field == 'Лекция':
-            return Cell(value=Table._fmt(ur.progress))
-        if stub_field == 'Время':
-            return Cell(value='—')  # TODO: вставить своё поле
-        if stub_field == 'ДЗ':
-            return Cell(value=Table._fmt(ur.awarded_score))
-        return Cell(value='—')
+        match header:
+            case 'Лекция iSpring':
+                return Cell(value=Table._fmt(ur.progress))
+            case 'Лекция IVA':
+                return Cell(value='', css='empty')
+            case 'Лекция итог':
+                result = False
+                # TODO: запрос в БД для данных IVA
+                user_iva = None
+                # TODO: сопоставление пользователя из IVA с текущим пользователем
+                if user_iva is None and ur.progress is not None and ur.progress >= 75.0:
+                    result = True
+                return Cell(value=str(int(result)))
+            case 'ДЗ порог':
+                return Cell(value=Table._fmt(ur.passing_score))
+            case 'ДЗ прогресс':
+                return Cell(value=Table._fmt(ur.progress))
+            case 'ДЗ итог':
+                result = False
+                ps = Table._fmt(ur.passing_score)
+                p = Table._fmt(ur.progress)
+                if ps != '' and p != '' and ur.progress >= ur.passing_score:  # noqa
+                    result = True
+                return Cell(value=str(int(result)))
+
+        return Cell(value=Table._fmt(ur.progress))
+
 
     @staticmethod
     def _fmt(value) -> str:
         if value is None:
-            return '—'
+            return ''
         if isinstance(value, float) and value.is_integer():
             return str(int(value))
         return str(value)
