@@ -324,9 +324,7 @@ class IspringApi:
             else:
                 user = User.objects.get(user_id=item['userId'])
                 users[item['userId']] = user
-            print(f'completionStaus: {item['completionStatus']}')
-            print(f'status_compliance.get(item["completionStatus"]): {status_compliance.get(item["completionStatus"])}')
-            print(f'status_compliance.get(item["completionStatus"], item["completionStatus"]): {status_compliance.get(item["completionStatus"], item["completionStatus"])}')
+
             user_results = UserResults(
                 user_id=item['userId'],
                 fio=f'{user.last_name} {user.first_name} {user.patronymic}'.strip(),

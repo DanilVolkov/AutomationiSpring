@@ -1,3 +1,4 @@
+import re
 from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
 from datetime import datetime
@@ -5,6 +6,7 @@ from datetime import datetime
 from django.core.cache import cache
 from django.template.loader import render_to_string
 from openpyxl import Workbook
+from openpyxl.cell import MergedCell
 from openpyxl.styles import Border, PatternFill, Side, Alignment, Font
 from openpyxl.utils import get_column_letter
 
@@ -150,10 +152,16 @@ class Table:
         fill = border = None
         for item in css.split():
             if item in self.fill_map:
-                fill = PatternFill(start_color=self.fill_map[item], end_color=self.fill_map[item])
+                fill = PatternFill(start_color=self.fill_map[item], end_color=self.fill_map[item], fill_type='solid')
 
-            if item == 'border-dark':
-                border = Border(right = Side(style='medium', color='000000'))
+        if 'border-dark' in css:
+            if 'border-bottom' in css:
+                border = Border(
+                    right=Side(style='medium', color='000000'),
+                    bottom=Side(style='medium', color='000000')
+                )
+            else:
+                border = Border(right=Side(style='medium', color='000000'))
 
         return fill, border
 
@@ -167,7 +175,7 @@ class Table:
             excel_cell.border = border
 
         excel_cell.alignment = Alignment(
-            horizontal='left' if is_header else 'center',
+            horizontal='center',
             vertical='center',
             wrap_text=True,
         )
@@ -175,19 +183,36 @@ class Table:
             excel_cell.font = Font(bold=True)
 
     @staticmethod
-    def _autosize_columns(ws, max_width: int = 40):
-        widths = {}
+    def _autosize_columns(ws):
+
+        def cell_text_len(value):
+            s = str(value)
+            lines = s.splitlines() or [s]
+            return max(len(line) for line in lines)
+
+        max_len = {}
 
         for row in ws.iter_rows():
             for cell in row:
                 if cell.value is None:
                     continue
-                col_letter = get_column_letter(cell.column)
-                length = len(str(cell.value))
-                widths[col_letter] = max(widths.get(col_letter, 0), length)
+                col = cell.column
+                l = cell_text_len(cell.value)
+                if l > max_len.get(col, 0):
+                    max_len[col] = l
+        for col_idx, l in max_len.items():
+            letter = get_column_letter(col_idx)
 
-        for col_letter, w in widths.items():
-            ws.column_dimensions[col_letter].width = min(w + 2, max_width)
+            # Эвристика:
+            # - +2 символа на `воздух`
+            # - масштаб по размеру шрифта
+            # - маленький коэффициент для компенсации ширины кириллицы/Calibri
+            width = l + 2
+
+            # Ограничим разумными границами, чтобы не улетало
+            width = min(max(width, 8), 25)
+
+            ws.column_dimensions[letter].width = width
 
 
     def _write_excel(self, header_top, header_bottom, rows) -> Workbook:
@@ -205,7 +230,7 @@ class Table:
             excel_cell = ws.cell(row=1, column=col, value=cell.value)
             self._apply_cell_style(excel_cell, cell, is_header=True)
 
-            end_row = 1 + (cell.rowspan - 1)
+            end_row = cell.rowspan
             end_col = col + (cell.colspan - 1)
 
             if cell.colspan > 1 or cell.rowspan > 1:
@@ -224,35 +249,14 @@ class Table:
             col += cell.colspan
 
         # Модули
-        col = 1
+        col = 3
         for cell in header_bottom:
             if cell.skip:
                 col += cell.colspan
                 continue
 
-            # Если ячейка уже занята merge сверху — пропускаем
-            if ws.cell(row=2, column=col).value is not None:
-                col += cell.colspan
-                continue
-
             excel_cell = ws.cell(row=2, column=col, value=cell.value)
             self._apply_cell_style(excel_cell, cell, is_header=True)
-
-            end_row = 2 + (cell.rowspan - 1)
-            end_col = col + (cell.colspan - 1)
-
-            if cell.colspan > 1 or cell.rowspan > 1:
-                ws.merge_cells(
-                    start_row=2, start_column=col,
-                    end_row=end_row, end_column=end_col,
-                )
-                for r in range(2, end_row + 1):
-                    for c in range(col, end_col + 1):
-                        self._apply_cell_style(
-                            ws.cell(row=r, column=c),
-                            cell,
-                            is_header=True
-                        )
 
             col += cell.colspan
 
@@ -267,24 +271,17 @@ class Table:
                     col += cell.colspan
                     continue
 
-                excel_cell = ws.cell(row=r, column=col, value=cell.value)
+                v = cell.value
+                regex = re.compile(r'\d+\.?\d*')
+                if regex.match(v):
+                    if v.isdigit():
+                        v = int(v)
+                    else:
+                        v = float(v)
+
+                excel_cell = ws.cell(row=r, column=col, value=v)
                 self._apply_cell_style(excel_cell, cell, is_header=False)
 
-                end_row = r + (cell.rowspan - 1)
-                end_col = col + (cell.colspan - 1)
-
-                if cell.colspan > 1 or cell.rowspan > 1:
-                    ws.merge_cells(
-                        start_row=r, start_column=col,
-                        end_row=end_row, end_column=end_col,
-                    )
-                    for r in range(r, end_row + 1):
-                        for c in range(col, end_col + 1):
-                            self._apply_cell_style(
-                                ws.cell(row=r, column=c),
-                                cell,
-                                is_header=False
-                            )
                 col += cell.colspan
 
         for row in range(1, ws.max_row + 1):
@@ -319,13 +316,13 @@ class Table:
 
     def _build_header_top(self, course_headers) -> list[Cell]:
         header: list[Cell] = [
-            Cell(value='№', rowspan=2, css='border-dark border-end'),
-            Cell(value='ФИО', rowspan=2, css='border-dark border-end'),
+            Cell(value='№', rowspan=2, css='border-dark border-end border-bottom'),
+            Cell(value='ФИО', rowspan=2, css='border-dark border-end border-bottom'),
         ]
 
         for course in self.track.courses:
             header.append(
-                Cell(value=course.title, colspan=len(course_headers[course.id]), css='border-dark border-end')
+                Cell(value=course.title, colspan=len(course_headers[course.id]), css='border-dark border-end border-bottom')
             )
 
         return header
@@ -350,13 +347,13 @@ class Table:
     def _build_header_bottom(self) -> tuple[list[Cell], dict[str, list[Cell]]]:
         header: list[Cell] = []
         course_headers: dict[str, list] = defaultdict(list)
-        lecture_headers = tuple(map(lambda x: Cell(value=x, css='module'), self.module_stub_fields[:3]))
-        hw_headers = tuple(map(lambda x: Cell(value=x, css='module'), self.module_stub_fields[3:]))
+        lecture_headers = tuple(map(lambda x: Cell(value=x, css='module border-bottom border-dark'), self.module_stub_fields[:3]))
+        hw_headers = tuple(map(lambda x: Cell(value=x, css='module border-bottom border-dark'), self.module_stub_fields[3:]))
         for course in self.track.courses:
             if not course.modules:
                 # Пустой курс — пустая ячейка в нижней шапке.
-                header.append(Cell(value='', css='border-dark border-end'))
-                course_headers[course.id].append(Cell(value='', css='border-dark border-end'))
+                header.append(Cell(value='', css='border-dark border-end border-bottom'))
+                course_headers[course.id].append(Cell(value='', css='border-dark border-end border-bottom'))
                 continue
 
             lecture = []
@@ -371,7 +368,7 @@ class Table:
                     for c in hw_headers:
                         hw.append(Cell(module_id=module.id, value=c.value, css=c.css))
                 else:
-                    others.append(Cell(module_id=module.id, value=module.title, css='module'))
+                    others.append(Cell(module_id=module.id, value=module.title, css='module border-dark border-bottom'))
 
             if len(lecture) > 0:
                 header.extend(lecture)
@@ -382,9 +379,6 @@ class Table:
             if len(others) > 0:
                 header.extend(others)
                 course_headers[course.id].extend(others)
-
-            header[-1].css += ' border-dark border-end'
-            header[-1].css.strip()
 
         return header, course_headers
 

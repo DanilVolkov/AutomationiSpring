@@ -1,6 +1,8 @@
 import json
 import tempfile
 from dataclasses import asdict
+from datetime import datetime
+from io import BytesIO
 
 from django.core.cache import cache
 from django.db import connection
@@ -160,6 +162,11 @@ class TrackDetailView(TemplateView):
         context = super().get_context_data(**kwargs)
         context['title'] = 'Траектория'
         context['track_id'] = self.kwargs['track_id']
+        api = get_ispring_api()
+        breadcrumbs = api.get_parents_item(self.kwargs['track_id']) if self.kwargs['track_id'] else []
+
+        context['breadcrumbs'] = breadcrumbs
+
         return context
 
 
@@ -212,13 +219,14 @@ class TrackExportExcelView(View):
             if table is None or table.track.id != track_id:
                 return JsonResponse({'ok': False, 'error': 'Данных для загрузки нет'}, status=502)
 
-            # TODO: сделать временный файл и сохранение информации в него, затем отдачу этого файла пользователю
             wb = table.to_excel()
-
+            buffer = BytesIO()
+            wb.save(buffer)
+            buffer.seek(0)
             response = FileResponse(
-                open(tmp.name, 'rb'),
+                buffer,
                 as_attachment=True,
-                filename=f'{learning_track.title}.xlsx',
+                filename=f'{table.track.title} {datetime.now().strftime('%d.%m.%Y %H.%M.%S')}.xlsx',
                 content_type=(
                     'application/vnd.openxmlformats-officedocument'
                     '.spreadsheetml.sheet'

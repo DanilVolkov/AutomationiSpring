@@ -6,8 +6,7 @@
     <div class="d-flex flex-wrap align-items-center justify-content-center justify-content-lg-start gap-3">
 
         <div id="breadcrumbs-container" class="me-lg-auto">
-            {% include 'order/partials/_breadcrumbs.html' with
-            breadcrumbs=breadcrumbs %}
+            {% include 'order/partials/_breadcrumbs.html' with breadcrumbs=breadcrumbs %}
         </div>
 
         <div class="text-end d-flex gap-3">
@@ -22,7 +21,7 @@
 
             <a href="{% url 'track_export_xlsx' track_id %}"
                id="btn-export-excel"
-               class="btn btn-outline-secondary">
+               class="btn btn-outline-primary">
                 <span id="btn-export-excel-spinner"
                       class="spinner-border spinner-border-sm me-2 d-none"
                       role="status" aria-hidden="true"></span>
