@@ -79,6 +79,7 @@ class UserResults:
 @dataclass
 class Cell:
     value: str
+    module_id: str = None
     colspan: int = 1
     rowspan: int = 1
     skip: bool = False
@@ -171,18 +172,9 @@ class Table:
             if is_hw:
                 return 'hw'
 
-        # if (
-        #     module.result_users is not None and
-        #     len(module.result_users) > 0 and
-        #     module.result_users[0].passing_score is not None and
-        #     module.result_users[0].awarded_score is not None
-        # ):
-        #     return 'hw'
-
         return 'other'
 
-
-    def _build_header_bottom(self) -> tuple[list[Cell], dict[str, list]]:
+    def _build_header_bottom(self) -> tuple[list[Cell], dict[str, list[Cell]]]:
         header: list[Cell] = []
         course_headers: dict[str, list] = defaultdict(list)
         lecture_headers = tuple(map(lambda x: Cell(value=x, css='module'), self.module_stub_fields[:3]))
@@ -191,28 +183,30 @@ class Table:
             if not course.modules:
                 # Пустой курс — пустая ячейка в нижней шапке.
                 header.append(Cell(value='', css='module-empty'))
-                course_headers[course.id].append('')
+                course_headers[course.id].append(Cell(value='', css='module-empty'))
                 continue
 
-            is_lecture = False
-            is_hw = False
+            lecture = []
+            hw = []
             others = []
             for module in course.modules:
                 module_type = self._get_type_item(module)
-                if module_type == 'video' and not is_lecture:
-                    is_lecture = True
-                elif module_type == 'hw' and not is_hw:
-                    is_hw = True
+                if module_type == 'video' and len(lecture) == 0:
+                    for c in lecture_headers:
+                        lecture.append(Cell(module_id=module.id, value=c.value, css=c.css))
+                elif module_type == 'hw' and len(hw) == 0:
+                    for c in hw_headers:
+                        hw.append(Cell(module_id=module.id, value=c.value, css=c.css))
                 else:
-                    others.append(Cell(value=module.title, css='module'))
+                    others.append(Cell(module_id=module.id, value=module.title, css='module'))
 
-            if is_lecture:
-                header.extend(lecture_headers)
-                course_headers[course.id].extend(lecture_headers)
-            if is_hw:
-                header.extend(hw_headers)
-                course_headers[course.id].extend(hw_headers)
-            if others:
+            if len(lecture) > 0:
+                header.extend(lecture)
+                course_headers[course.id].extend(lecture)
+            if len(hw) > 0:
+                header.extend(hw)
+                course_headers[course.id].extend(hw)
+            if len(others) > 0:
                 header.extend(others)
                 course_headers[course.id].extend(others)
 
@@ -229,7 +223,7 @@ class Table:
             users.items(), key=lambda item: (item[1].fio or '').lower()
         ))
 
-    def _build_rows(self, course_headers: dict[str, list]) -> list[list[Cell]]:
+    def _build_rows(self, course_headers: dict[str, list[Cell]]) -> list[list[Cell]]:
         users = self._collect_users()
         rows: list[list[Cell]] = []
 
@@ -244,17 +238,41 @@ class Table:
                     row.append(Cell(value='', css='empty'))
                     continue
 
-                for module in course.modules:
-                    user_results = self._find_result(module, user_id)
-                    for header in course_headers[course.id]:
-                        row.append(self._make_cell(header.value, user_results))
+                for header in course_headers[course.id]:
+                    module: Module | None = None
+
+                    if header.module_id is None:
+                        row.append(Cell(value='', css='empty'))
+                        continue
+
+                    for m in course.modules:
+                        if header.module_id == m.id:
+                            module = m
+                            break
+
+                    if module is None:
+                        row.append(Cell(value='', css='empty'))
+                        continue
+
+                    user_results = self._find_user_results_in_module(
+                        module,
+                        user_id
+                    )
+                    row.append(self._make_cell(header.value, user_results))
+
+
+
+                # for module in course.modules:
+                #     user_results = self._find_user_results_in_module(module, user_id)
+                #     for header in course_headers[course.id]:
+                #         row.append(self._make_cell(header.value, user_results))
             print(row)
             rows.append(row)
         print(rows)
         return rows
 
     @staticmethod
-    def _find_result(module: Module, user_id: str) -> UserResults | None:
+    def _find_user_results_in_module(module: Module, user_id: str) -> UserResults | None:
         for r in module.result_users:
             if r.user_id == user_id:
                 return r
@@ -267,7 +285,7 @@ class Table:
 
         match header:
             case 'Лекция iSpring':
-                return Cell(value=Table._fmt(ur.progress))
+                return Cell(value=Table._format_value(ur.progress))
             case 'Лекция IVA':
                 return Cell(value='', css='empty')
             case 'Лекция итог':
@@ -279,22 +297,36 @@ class Table:
                     result = True
                 return Cell(value=str(int(result)))
             case 'ДЗ порог':
-                return Cell(value=Table._fmt(ur.passing_score))
+                return Cell(value=Table._format_value(ur.passing_score))
             case 'ДЗ прогресс':
-                return Cell(value=Table._fmt(ur.progress))
+                result = ur.progress
+                if (
+                    (ur.progress is None and ur.awarded_score is not None) or
+                    (ur.progress is not None and ur.awarded_score is not None
+                    and ur.progress != ur.awarded_score)
+                ):
+                    result = ur.awarded_score
+                return Cell(value=Table._format_value(result))
             case 'ДЗ итог':
-                result = False
-                ps = Table._fmt(ur.passing_score)
-                p = Table._fmt(ur.progress)
-                if ps != '' and p != '' and ur.progress >= ur.passing_score:  # noqa
-                    result = True
-                return Cell(value=str(int(result)))
+                result = ''
+                if ur.completion_status is not None:
+                    result = ur.completion_status
+                else:
+                    ps = Table._format_value(ur.passing_score)
+                    p = Table._format_value(ur.progress)
+                    if ps != '' and p != '':
+                        if ur.progress >= ur.passing_score:
+                            result = 'Принято'
+                        else:
+                            result = 'Отклонено'
 
-        return Cell(value=Table._fmt(ur.progress))
+                return Cell(value=result)
+
+        return Cell(value=Table._format_value(ur.progress))
 
 
     @staticmethod
-    def _fmt(value) -> str:
+    def _format_value(value) -> str:
         if value is None:
             return ''
         if isinstance(value, float) and value.is_integer():
