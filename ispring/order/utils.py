@@ -2,7 +2,11 @@ from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 
+from django.core.cache import cache
 from django.template.loader import render_to_string
+from openpyxl import Workbook
+from openpyxl.styles import Border, PatternFill, Side, Alignment, Font
+from openpyxl.utils import get_column_letter
 
 status_compliance = {
     'not_started': 'Не начато',
@@ -123,17 +127,179 @@ class Table:
         ".swf"
     )
 
+    fill_map = {
+        'table-success': 'D4EDDA',
+        'table-danger': 'F8D7DA',
+        'table-warning': 'FFF3CD',
+        'table-info': 'CFE2FF',
+        'table-primary': 'CFE2FF'
+    }
+
     def __init__(
             self,
             learning_track: LearningTrack,
     ):
-        self._track = learning_track
+        self.track = learning_track
 
+    def to_excel(self):
+        header_top, header_bottom, rows = self._build_table()
+
+        return self._write_excel(header_top, header_bottom, rows)
+
+    def _parse_css(self, css: str):
+        fill = border = None
+        for item in css.split():
+            if item in self.fill_map:
+                fill = PatternFill(start_color=self.fill_map[item], end_color=self.fill_map[item])
+
+            if item == 'border-dark':
+                border = Border(right = Side(style='medium', color='000000'))
+
+        return fill, border
+
+
+    def _apply_cell_style(self, excel_cell, cell: Cell, is_header: bool = False):
+        fill, border = self._parse_css(cell.css)
+
+        if fill:
+            excel_cell.fill = fill
+        if border:
+            excel_cell.border = border
+
+        excel_cell.alignment = Alignment(
+            horizontal='left' if is_header else 'center',
+            vertical='center',
+            wrap_text=True,
+        )
+        if is_header:
+            excel_cell.font = Font(bold=True)
+
+    @staticmethod
+    def _autosize_columns(ws, max_width: int = 40):
+        widths = {}
+
+        for row in ws.iter_rows():
+            for cell in row:
+                if cell.value is None:
+                    continue
+                col_letter = get_column_letter(cell.column)
+                length = len(str(cell.value))
+                widths[col_letter] = max(widths.get(col_letter, 0), length)
+
+        for col_letter, w in widths.items():
+            ws.column_dimensions[col_letter].width = min(w + 2, max_width)
+
+
+    def _write_excel(self, header_top, header_bottom, rows) -> Workbook:
+        wb = Workbook()
+        ws = wb.active
+        ws.title = 'Подробно'
+
+        # Курсы
+        col = 1
+        for cell in header_top:
+            if cell.skip:
+                col += cell.colspan
+                continue
+
+            excel_cell = ws.cell(row=1, column=col, value=cell.value)
+            self._apply_cell_style(excel_cell, cell, is_header=True)
+
+            end_row = 1 + (cell.rowspan - 1)
+            end_col = col + (cell.colspan - 1)
+
+            if cell.colspan > 1 or cell.rowspan > 1:
+                ws.merge_cells(
+                    start_row=1, start_column=col,
+                    end_row=end_row, end_column=end_col,
+                )
+                # Проставляем стиль всем ячейкам merge — иначе границы пропадут
+                for r in range(1, end_row + 1):
+                    for c in range(col, end_col + 1):
+                        self._apply_cell_style(
+                            ws.cell(row=r, column=c),
+                            cell,
+                            is_header=True
+                        )
+            col += cell.colspan
+
+        # Модули
+        col = 1
+        for cell in header_bottom:
+            if cell.skip:
+                col += cell.colspan
+                continue
+
+            # Если ячейка уже занята merge сверху — пропускаем
+            if ws.cell(row=2, column=col).value is not None:
+                col += cell.colspan
+                continue
+
+            excel_cell = ws.cell(row=2, column=col, value=cell.value)
+            self._apply_cell_style(excel_cell, cell, is_header=True)
+
+            end_row = 2 + (cell.rowspan - 1)
+            end_col = col + (cell.colspan - 1)
+
+            if cell.colspan > 1 or cell.rowspan > 1:
+                ws.merge_cells(
+                    start_row=2, start_column=col,
+                    end_row=end_row, end_column=end_col,
+                )
+                for r in range(2, end_row + 1):
+                    for c in range(col, end_col + 1):
+                        self._apply_cell_style(
+                            ws.cell(row=r, column=c),
+                            cell,
+                            is_header=True
+                        )
+
+            col += cell.colspan
+
+        # Данные
+        start_data_row = 3
+        for i, row in enumerate(rows):
+            r = start_data_row + i
+            col = 1
+
+            for cell in row:
+                if cell.skip:
+                    col += cell.colspan
+                    continue
+
+                excel_cell = ws.cell(row=r, column=col, value=cell.value)
+                self._apply_cell_style(excel_cell, cell, is_header=False)
+
+                end_row = r + (cell.rowspan - 1)
+                end_col = col + (cell.colspan - 1)
+
+                if cell.colspan > 1 or cell.rowspan > 1:
+                    ws.merge_cells(
+                        start_row=r, start_column=col,
+                        end_row=end_row, end_column=end_col,
+                    )
+                    for r in range(r, end_row + 1):
+                        for c in range(col, end_col + 1):
+                            self._apply_cell_style(
+                                ws.cell(row=r, column=c),
+                                cell,
+                                is_header=False
+                            )
+                col += cell.colspan
+
+        for row in range(1, ws.max_row + 1):
+            ws.cell(row=row, column=2).alignment = Alignment(
+                horizontal='left',
+                vertical='center',
+                wrap_text=True,
+            )
+
+        self._autosize_columns(ws)
+        ws.freeze_panes = 'C3'
+        return wb
 
     def to_html(self) -> str:
-        header_bottom, course_headers = self._build_header_bottom()
-        header_top = self._build_header_top(course_headers)
-        rows = self._build_rows(course_headers)
+        header_top, header_bottom, rows = self._build_table()
 
         return render_to_string(
             'order/partials/_track_table.html',
@@ -144,15 +310,22 @@ class Table:
             },
         )
 
+    def _build_table(self):
+        header_bottom, course_headers = self._build_header_bottom()
+        header_top = self._build_header_top(course_headers)
+        rows = self._build_rows(course_headers)
+
+        return header_top, header_bottom, rows
+
     def _build_header_top(self, course_headers) -> list[Cell]:
         header: list[Cell] = [
-            Cell(value='№', rowspan=2, css='corner'),
-            Cell(value='ФИО', rowspan=2, css='corner'),
+            Cell(value='№', rowspan=2, css='border-dark border-end'),
+            Cell(value='ФИО', rowspan=2, css='border-dark border-end'),
         ]
 
-        for course in self._track.courses:
+        for course in self.track.courses:
             header.append(
-                Cell(value=course.title, colspan=len(course_headers[course.id]), css='course')
+                Cell(value=course.title, colspan=len(course_headers[course.id]), css='border-dark border-end')
             )
 
         return header
@@ -179,11 +352,11 @@ class Table:
         course_headers: dict[str, list] = defaultdict(list)
         lecture_headers = tuple(map(lambda x: Cell(value=x, css='module'), self.module_stub_fields[:3]))
         hw_headers = tuple(map(lambda x: Cell(value=x, css='module'), self.module_stub_fields[3:]))
-        for course in self._track.courses:
+        for course in self.track.courses:
             if not course.modules:
                 # Пустой курс — пустая ячейка в нижней шапке.
-                header.append(Cell(value='', css='module-empty'))
-                course_headers[course.id].append(Cell(value='', css='module-empty'))
+                header.append(Cell(value='', css='border-dark border-end'))
+                course_headers[course.id].append(Cell(value='', css='border-dark border-end'))
                 continue
 
             lecture = []
@@ -210,11 +383,16 @@ class Table:
                 header.extend(others)
                 course_headers[course.id].extend(others)
 
+            header[-1].css += ' border-dark border-end'
+            header[-1].css.strip()
+
         return header, course_headers
 
     def _collect_users(self) -> dict[str, UserResults]:
         users: dict[str, UserResults] = dict()
-        for course in self._track.courses:
+        for course in self.track.courses:
+            if not course.modules:
+                return {}
             for module in course.modules:
                 for user in module.result_users:
                     if user.user_id not in users:
@@ -229,11 +407,11 @@ class Table:
 
         for idx, (user_id, ur) in enumerate(users.items(), start=1):
             row: list[Cell] = [
-                Cell(value=str(idx), css='num'),
-                Cell(value=(ur.fio or ''), css='fio'),
+                Cell(value=str(idx), css='border-dark border-end'),
+                Cell(value=(ur.fio or ''), css='border-dark border-end'),
             ]
 
-            for course in self._track.courses:
+            for course in self.track.courses:
                 if not course.modules:
                     row.append(Cell(value='', css='empty'))
                     continue
@@ -259,16 +437,9 @@ class Table:
                         user_id
                     )
                     row.append(self._make_cell(header.value, user_results))
-
-
-
-                # for module in course.modules:
-                #     user_results = self._find_user_results_in_module(module, user_id)
-                #     for header in course_headers[course.id]:
-                #         row.append(self._make_cell(header.value, user_results))
-            print(row)
+                row[-1].css += ' border-dark border-end'
+                row[-1].css.strip()
             rows.append(row)
-        print(rows)
         return rows
 
     @staticmethod
@@ -295,7 +466,10 @@ class Table:
                 # TODO: сопоставление пользователя из IVA с текущим пользователем
                 if user_iva is None and ur.progress is not None and ur.progress >= 75.0:
                     result = True
-                return Cell(value=str(int(result)))
+                if result:
+                    return Cell(value=str(int(result)), css='table-success')
+                else:
+                    return Cell(value=str(int(result)), css='table-danger')
             case 'ДЗ порог':
                 return Cell(value=Table._format_value(ur.passing_score))
             case 'ДЗ прогресс':
@@ -309,7 +483,17 @@ class Table:
                 return Cell(value=Table._format_value(result))
             case 'ДЗ итог':
                 result = ''
+                css = ''
                 if ur.completion_status is not None:
+                    match ur.completion_status:
+                        case 'Не начато': css = 'table-warning'
+                        case 'В процессе': css = 'table-info'
+                        case 'Принято':
+                            css = 'table-success'
+                        case 'Отклонено':
+                            css = 'table-danger'
+                        case 'Ожидает проверки':
+                            css = 'table-primary'
                     result = ur.completion_status
                 else:
                     ps = Table._format_value(ur.passing_score)
@@ -317,10 +501,12 @@ class Table:
                     if ps != '' and p != '':
                         if ur.progress >= ur.passing_score:
                             result = 'Принято'
+                            css = 'table-success'
                         else:
                             result = 'Отклонено'
+                            css = 'table-danger'
 
-                return Cell(value=result)
+                return Cell(value=result, css=css)
 
         return Cell(value=Table._format_value(ur.progress))
 

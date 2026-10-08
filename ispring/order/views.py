@@ -1,8 +1,10 @@
 import json
+import tempfile
 from dataclasses import asdict
 
+from django.core.cache import cache
 from django.db import connection
-from django.http import JsonResponse
+from django.http import JsonResponse, FileResponse
 from django.template.loader import render_to_string
 from django.views import View
 from django.views.generic import TemplateView
@@ -164,6 +166,7 @@ class TrackDetailView(TemplateView):
 class TrackDetailPartialView(View):
     def get(self, request, track_id, *args, **kwargs):
         try:
+            cache.set('table', None)
             api = get_ispring_api()
             learning_track = api.get_data_courses(track_id)
             table_html = None
@@ -171,7 +174,9 @@ class TrackDetailPartialView(View):
                 with open("data_results.json", "w", encoding="utf-8") as f:
                     json.dump(asdict(learning_track), f, ensure_ascii=False,
                     indent=4)
-                table_html = Table(learning_track).to_html()
+                table = Table(learning_track)
+                cache.set('table', table)
+                table_html = table.to_html()
 
             breadcrumbs = api.get_parents_item(track_id) if track_id else []
             breadcrumbs_html = render_to_string(
@@ -194,6 +199,32 @@ class TrackDetailPartialView(View):
                 'html': html,
                 'breadcrumbs_html': breadcrumbs_html,
             })
+
+        except RuntimeError as e:
+            return JsonResponse({'ok': False, 'error': str(e)}, status=502)
+
+
+class TrackExportExcelView(View):
+
+    def get(self, request, track_id, *args, **kwargs):
+        try:
+            table = cache.get('table')
+            if table is None or table.track.id != track_id:
+                return JsonResponse({'ok': False, 'error': 'Данных для загрузки нет'}, status=502)
+
+            # TODO: сделать временный файл и сохранение информации в него, затем отдачу этого файла пользователю
+            wb = table.to_excel()
+
+            response = FileResponse(
+                open(tmp.name, 'rb'),
+                as_attachment=True,
+                filename=f'{learning_track.title}.xlsx',
+                content_type=(
+                    'application/vnd.openxmlformats-officedocument'
+                    '.spreadsheetml.sheet'
+                ),
+            )
+            return response
 
         except RuntimeError as e:
             return JsonResponse({'ok': False, 'error': str(e)}, status=502)

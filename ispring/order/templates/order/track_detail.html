@@ -6,7 +6,8 @@
     <div class="d-flex flex-wrap align-items-center justify-content-center justify-content-lg-start gap-3">
 
         <div id="breadcrumbs-container" class="me-lg-auto">
-            {% include 'order/partials/_breadcrumbs.html' with breadcrumbs=breadcrumbs %}
+            {% include 'order/partials/_breadcrumbs.html' with
+            breadcrumbs=breadcrumbs %}
         </div>
 
         <div class="text-end d-flex gap-3">
@@ -19,14 +20,14 @@
                 <span id="btn-sync-courses-label">Загрузить отчет из IVA</span>
             </button>
 
-            <button type="button"
-                    id="btn-sync-users"
-                    class="btn btn-outline-primary">
-                <span id="btn-sync-users-spinner"
+            <a href="{% url 'track_export_xlsx' track_id %}"
+               id="btn-export-excel"
+               class="btn btn-outline-secondary">
+                <span id="btn-export-excel-spinner"
                       class="spinner-border spinner-border-sm me-2 d-none"
                       role="status" aria-hidden="true"></span>
-                <span id="btn-sync-users-label">Скачать таблицу</span>
-            </button>
+                <span id="btn-export-excel-label">Скачать таблицу</span>
+            </a>
         </div>
     </div>
 </header>
@@ -50,38 +51,38 @@
 </div>
 
 <script>
-(function () {
-    const container = document.getElementById('track-detail');
-    const crumbsEl = document.getElementById('breadcrumbs-container');
-    const trackId = "{{ track_id|escapejs }}";
+    (function () {
+        const container = document.getElementById('track-detail');
+        const crumbsEl = document.getElementById('breadcrumbs-container');
+        const trackId = "{{ track_id|escapejs }}";
 
-    fetch(`/partial/track/${encodeURIComponent(trackId)}/`, {
-        headers: { 'X-Requested-With': 'XMLHttpRequest' }
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (!data.ok) {
-            container.innerHTML =
-                `<div class="alert alert-danger mt-3" role="alert">
+        fetch(`/partial/track/${encodeURIComponent(trackId)}/`, {
+            headers: {'X-Requested-With': 'XMLHttpRequest'}
+        })
+            .then(r => r.json())
+            .then(data => {
+                if (!data.ok) {
+                    container.innerHTML =
+                        `<div class="alert alert-danger mt-3" role="alert">
                      Не удалось загрузить данные: ${data.error}
                      <button class="btn btn-sm btn-outline-danger ms-3"
                              onclick="window.location.reload()">Повторить</button>
                  </div>`;
-            return;
-        }
-        container.innerHTML = data.html;
-        if (data.breadcrumbs_html !== undefined) {
-            crumbsEl.innerHTML = data.breadcrumbs_html;
-        }
-    })
-    .catch(err => {
-        container.innerHTML =
-            `<div class="alert alert-danger mt-3" role="alert">
+                    return;
+                }
+                container.innerHTML = data.html;
+                if (data.breadcrumbs_html !== undefined) {
+                    crumbsEl.innerHTML = data.breadcrumbs_html;
+                }
+            })
+            .catch(err => {
+                container.innerHTML =
+                    `<div class="alert alert-danger mt-3" role="alert">
                  Произошла ошибка: ${err.message}
                  <button class="btn btn-sm btn-outline-danger ms-3"
                          onclick="window.location.reload()">Повторить</button>
              </div>`;
-    });
-})();
+            });
+    })();
 </script>
 {% endblock %}

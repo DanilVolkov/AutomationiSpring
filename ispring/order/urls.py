@@ -28,4 +28,7 @@ urlpatterns = [
         views.TrackDetailPartialView.as_view(),
         name='track_detail_partial',
     ),
+    path('track/<str:track_id>/export.xlsx/',
+             views.TrackExportExcelView.as_view(),
+             name='track_export_xlsx'),
 ]

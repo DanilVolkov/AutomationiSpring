@@ -132,6 +132,14 @@ MAILERS = {
     },
 }
 
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'default-cache',
+        'TIMEOUT': None
+    },
+}
+
 # iSpring
 env = Env()
 env.read_env()
