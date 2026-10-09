@@ -11,13 +11,19 @@
 
         <div class="text-end d-flex gap-3">
             <button type="button"
-                    id="btn-sync-courses"
-                    class="btn btn-outline-primary">
-                <span id="btn-sync-courses-spinner"
+                    id="btn-upload-iva"
+                    class="btn btn-outline-primary"
+                    data-upload-url="{% url 'track_upload_iva' track_id %}">
+                <span id="btn-upload-iva-spinner"
                       class="spinner-border spinner-border-sm me-2 d-none"
                       role="status" aria-hidden="true"></span>
-                <span id="btn-sync-courses-label">Загрузить отчет из IVA</span>
+                <span id="btn-upload-iva-label">Загрузить отчет из IVA</span>
             </button>
+
+            <input type="file"
+               id="iva-file-input"
+               accept=".csv,text/csv"
+               class="d-none">
 
             <a href="{% url 'track_export_xlsx' track_id %}"
                id="btn-export-excel"
@@ -49,39 +55,170 @@
 
 </div>
 
-<script>
-    (function () {
-        const container = document.getElementById('track-detail');
-        const crumbsEl = document.getElementById('breadcrumbs-container');
-        const trackId = "{{ track_id|escapejs }}";
+{# ---------- Контейнер для toast ---------- #}
+<div id="toast-container"
+     class="toast-container position-fixed bottom-0 end-0 p-3"
+     style="z-index: 1080;"></div>
 
-        fetch(`/partial/track/${encodeURIComponent(trackId)}/`, {
-            headers: {'X-Requested-With': 'XMLHttpRequest'}
+{# ---------- Модалка конфликтов ---------- #}
+<div class="modal fade" id="conflicts-modal" tabindex="-1"
+     aria-labelledby="conflicts-modal-label" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="conflicts-modal-label">
+                    Обнаружены конфликты
+                </h5>
+                <button type="button" class="btn-close"
+                        data-bs-dismiss="modal" aria-label="Закрыть"></button>
+            </div>
+
+            <div class="modal-body" id="conflicts-modal-body">
+                {# ← JS положит содержимое конфликтов; пока пусто #}
+            </div>
+
+            <div class="modal-footer">
+                <button type="button"
+                        class="btn btn-primary"
+                        id="conflicts-modal-accept"
+                        data-bs-dismiss="modal">
+                    Принять
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    // ==================== Загрузка таблицы траектории ====================
+    const container = document.getElementById('track-detail');
+    const crumbsEl  = document.getElementById('breadcrumbs-container');
+    const trackId   = "{{ track_id|escapejs }}";
+
+    fetch(`/partial/track/${encodeURIComponent(trackId)}/`, {
+        headers: {'X-Requested-With': 'XMLHttpRequest'}
+    })
+        .then(r => r.json())
+        .then(data => {
+            if (!data.ok) {
+                container.innerHTML = `<div class="alert alert-danger mt-3">${data.error}</div>`;
+                return;
+            }
+            container.innerHTML = data.html;
+            if (data.breadcrumbs_html !== undefined) {
+                crumbsEl.innerHTML = data.breadcrumbs_html;
+            }
         })
-            .then(r => r.json())
-            .then(data => {
-                if (!data.ok) {
-                    container.innerHTML =
-                        `<div class="alert alert-danger mt-3" role="alert">
-                     Не удалось загрузить данные: ${data.error}
-                     <button class="btn btn-sm btn-outline-danger ms-3"
-                             onclick="window.location.reload()">Повторить</button>
-                 </div>`;
-                    return;
-                }
+        .catch(err => {
+            container.innerHTML = `<div class="alert alert-danger mt-3">${err.message}</div>`;
+        });
+
+    // ==================== Загрузка CSV из ИВА ====================
+    const btnUpload    = document.getElementById('btn-upload-iva');
+    const btnSpinner   = document.getElementById('btn-upload-iva-spinner');
+    const btnLabel     = document.getElementById('btn-upload-iva-label');
+    const fileInput    = document.getElementById('iva-file-input');
+
+    const modalEl      = document.getElementById('conflicts-modal');
+    const modalBody    = document.getElementById('conflicts-modal-body');
+    const modalAccept  = document.getElementById('conflicts-modal-accept');
+
+    // ← вот здесь теперь bootstrap ОПРЕДЕЛЁН, потому что DOM загружен
+    const modal = modalEl ? new bootstrap.Modal(modalEl) : null;
+
+    const toastContainer = document.getElementById('toast-container');
+
+    function getCsrfToken() {
+        const match = document.cookie.match(/csrftoken=([^;]+)/);
+        return match ? match[1] : '';
+    }
+
+    function showToast(message, type) {
+        const bgClass = {
+            success: 'text-bg-success',
+            danger:  'text-bg-danger',
+            info:    'text-bg-primary',
+            warning: 'text-bg-warning',
+        }[type] || 'text-bg-secondary';
+
+        const el = document.createElement('div');
+        el.className = `toast align-items-center ${bgClass} border-0`;
+        el.innerHTML = `
+            <div class="d-flex">
+                <div class="toast-body">${message}</div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto"
+                        data-bs-dismiss="toast" aria-label="Закрыть"></button>
+            </div>`;
+        toastContainer.appendChild(el);
+        const t = new bootstrap.Toast(el, { autohide: false });
+        t.show();
+        el.addEventListener('hidden.bs.toast', () => el.remove());
+    }
+
+    btnUpload.addEventListener('click', function () {
+        fileInput.value = '';
+        fileInput.click();
+    });
+
+    fileInput.addEventListener('change', function () {
+        const file = fileInput.files[0];
+        if (!file) return;
+        uploadFile(file);
+    });
+
+    function uploadFile(file) {
+        btnUpload.disabled = true;
+        btnSpinner.classList.remove('d-none');
+        btnLabel.textContent = 'Обработка…';
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        fetch(btnUpload.dataset.uploadUrl, {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': getCsrfToken(),
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            body: formData,
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (!data.ok && !data.dialog) {
+                showToast('Ошибка: ' + (data.error || 'неизвестная'), 'danger');
+                return;
+            }
+            if (data.dialog) {
+                renderConflicts(data.conflicts);
+                if (modal) modal.show();
+                return;
+            }
+            if (data.ok && data.html !== undefined) {
                 container.innerHTML = data.html;
-                if (data.breadcrumbs_html !== undefined) {
-                    crumbsEl.innerHTML = data.breadcrumbs_html;
-                }
-            })
-            .catch(err => {
-                container.innerHTML =
-                    `<div class="alert alert-danger mt-3" role="alert">
-                 Произошла ошибка: ${err.message}
-                 <button class="btn btn-sm btn-outline-danger ms-3"
-                         onclick="window.location.reload()">Повторить</button>
-             </div>`;
-            });
-    })();
+                showToast(`Загружено строк: ${data.rows_count}`, 'success');
+            }
+        })
+        .catch(err => showToast('Ошибка сети: ' + err.message, 'danger'))
+        .finally(() => {
+            btnUpload.disabled = false;
+            btnSpinner.classList.add('d-none');
+            btnLabel.textContent = 'Загрузить отчет из IVA';
+        });
+    }
+
+    function renderConflicts(conflicts) {
+        const n = Array.isArray(conflicts) ? conflicts.length : 0;
+        modalBody.innerHTML = `
+            <div class="alert alert-warning mb-0">
+                Найдено конфликтов: <strong>${n}</strong>.
+                <br><small class="text-muted">Содержимое диалога добавим позже.</small>
+            </div>`;
+    }
+
+    modalAccept.addEventListener('click', function () {
+        // TODO
+    });
+});
 </script>
 {% endblock %}

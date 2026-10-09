@@ -31,4 +31,8 @@ urlpatterns = [
     path('track/<str:track_id>/export.xlsx/',
              views.TrackExportExcelView.as_view(),
              name='track_export_xlsx'),
+    path('track/<str:track_id>/upload-iva/',
+             views.TrackUploadIvaView.as_view(),
+             name='track_upload_iva'
+    ),
 ]

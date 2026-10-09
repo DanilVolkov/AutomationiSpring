@@ -1,7 +1,7 @@
 import re
 from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from django.core.cache import cache
 from django.template.loader import render_to_string
@@ -22,6 +22,33 @@ status_compliance = {
     'declined': 'Отклонено',
 }
 
+
+@dataclass
+class IvaUser:
+    fio: str
+    email: str | None
+    entry_time: datetime
+    exit_time: datetime
+    duration: timedelta
+    device: str
+    ip_address: str
+    user_id_ispring: str | None = None
+
+    @staticmethod
+    def _str_to_datetime(s: str) -> datetime:
+        return datetime.strptime(' '.join(s.split()), '%d.%m.%Y %H:%M')
+
+    @classmethod
+    def make(cls, fio: str, email: str, entry_time: str, exit_time: str, duration: str, device: str, ip_address: str):
+        _entry_time = cls._str_to_datetime(entry_time)
+        _exit_time = cls._str_to_datetime(exit_time)
+        r = re.compile(r'(\d+)\s*час\w*\s*(\d+)\s*минут\w*', re.IGNORECASE)
+        match = r.search(duration)
+        if not match:
+            _duration = timedelta(0)
+        else:
+            _duration = timedelta(hours=int(match.group(1)), minutes=int(match.group(2)))
+        return cls(fio, email, _entry_time, _exit_time, _duration, device, ip_address)
 
 @dataclass
 class Folder:
@@ -76,10 +103,10 @@ class Module:
 class UserResults:
     user_id: str
     fio: str
-    completion_status: str
-    progress: float | int | None
-    awarded_score: float | int | None  # только в дз
-    passing_score: float | int | None  # только в дз
+    completion_status: str = None
+    progress: float | int | None = None
+    awarded_score: float | int | None = None  # только в дз
+    passing_score: float | int | None = None  # только в дз
 
 
 @dataclass
@@ -142,6 +169,7 @@ class Table:
             learning_track: LearningTrack,
     ):
         self.track = learning_track
+        self.track_users = self._collect_users()
 
     def to_excel(self):
         header_top, header_bottom, rows = self._build_table()
@@ -390,16 +418,15 @@ class Table:
             for module in course.modules:
                 for user in module.result_users:
                     if user.user_id not in users:
-                        users[user.user_id] = user
+                        users[user.user_id] = UserResults(user_id=user.user_id, fio=user.fio)
         return dict(sorted(
             users.items(), key=lambda item: (item[1].fio or '').lower()
         ))
 
     def _build_rows(self, course_headers: dict[str, list[Cell]]) -> list[list[Cell]]:
-        users = self._collect_users()
         rows: list[list[Cell]] = []
 
-        for idx, (user_id, ur) in enumerate(users.items(), start=1):
+        for idx, (user_id, ur) in enumerate(self.track_users.items(), start=1):
             row: list[Cell] = [
                 Cell(value=str(idx), css='border-dark border-end'),
                 Cell(value=(ur.fio or ''), css='border-dark border-end'),

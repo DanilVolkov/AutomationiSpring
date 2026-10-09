@@ -1,5 +1,8 @@
+import csv
+import io
 import json
 import tempfile
+from collections import defaultdict
 from dataclasses import asdict
 from datetime import datetime
 from io import BytesIO
@@ -14,7 +17,8 @@ from ispring.settings import ISPRING_DEFAULT_FOLDER_ID
 
 from order.models import User
 from order.services import get_ispring_api
-from order.utils import Table
+from order.utils import Table, IvaUser
+
 
 # class OrderHome(TemplateView):
 #     template_name = 'order/index.html'
@@ -236,3 +240,146 @@ class TrackExportExcelView(View):
 
         except RuntimeError as e:
             return JsonResponse({'ok': False, 'error': str(e)}, status=502)
+
+
+class TrackUploadIvaView(View):
+
+    def post(self, request, track_id, *args, **kwargs):
+        table = cache.get('table')
+        if table is None or table.track.id != track_id:
+            return JsonResponse(
+                {'ok': False, 'error': 'Данных для загрузки нет'}, status=502)
+
+        csv_file = request.FILES.get('file')
+        if not csv_file:
+            return JsonResponse(
+                {'ok': False, 'error': 'Файл не передан'},
+                status=400,
+            )
+
+        try:
+            raw = csv_file.read()
+            for encoding in ('utf-8-sig', 'utf-8', 'cp1251'):
+                try:
+                    text = raw.decode(encoding)
+                    break
+                except UnicodeDecodeError:
+                    pass
+            else:
+                return JsonResponse(
+                    {'ok': False, 'error': 'Не удалось определить кодировку файла'},
+                    status=400,
+                )
+
+            reader = csv.DictReader(io.StringIO(text), delimiter=';')
+            rows = list(reader)
+        except Exception as e:
+            return JsonResponse(
+                {'ok': False, 'error': f'Ошибка чтения CSV: {e}'},
+                status=400,
+            )
+
+        # Удаление дубликатов
+        track_users = table.track_users
+        rows = list(map(
+            lambda r: IvaUser.make(
+                fio=r['Имя участника'],
+                email=r['Email/телефон'],
+                entry_time=r['Время входа'],
+                exit_time=r['Время выхода'],
+                duration=r['Длительность'],
+                device=r['Тип оборудования'],
+                ip_address=r['IP-адрес']
+            ), rows
+        ))
+        unique_fio: dict[str, IvaUser] = {}
+        for r in rows:
+            if r.fio in unique_fio:
+                unique_fio[r.fio].duration += r.duration
+            else:
+                unique_fio[r.fio] = r
+        rows = list(unique_fio.values())
+
+        unique_ip: dict[str, IvaUser] = {}
+        for r in rows:
+            if r.ip_address in unique_ip:
+                unique_ip[r.ip_address].duration += r.duration
+                if len(unique_ip[r.ip_address].fio) < len(r.fio) and not unique_ip[r.ip_address].email:
+                    unique_ip[r.ip_address].fio = r.fio
+            else:
+                unique_ip[r.ip_address] = r
+        rows = list(unique_ip.values())
+
+        for r in rows:
+            name_participant = r.fio.split()
+            for u in track_users.values():
+                max_count = len(u.fio.split())
+                count = len(list(filter(
+                    lambda np: np in u.fio, name_participant
+                )))
+                if count >= max_count:
+                    r.user_id_ispring = u.user_id
+
+        for row in rows:
+            print(f'fio: {row.fio}; user_id_ispring: {row.user_id_ispring}')
+
+        conflicts = defaultdict(list)
+        for row_1 in rows:
+            for row_2 in rows:
+                if row_1 == row_2:
+                    continue
+                if row_1.fio in row_2.fio:
+                    conflicts[row_1.fio].append(row_2.fio)
+
+        # TODO: один и тот же человек или нет - решает пользователь в диалоге с ним
+        # Диалог в формате опроса на 1 странице - это один и тот же человек или нет?
+        # Далее мы получаем от пользователя форму и обрабатываем её.
+        # При обработке сопоставляем, какой выбор сделал пользователь и учитываем
+        # у кого удалить дубликат и сложить имя, а кого оставить.
+        # Далее уже показываем пользователю итоговую таблицу.
+
+
+
+
+
+
+
+
+
+
+        # try:
+        #     cleaned_rows, conflicts = validate_iva_rows(rows)
+        # except Exception as e:
+        #     logger.exception('Ошибка валидации IVA')
+        #     return JsonResponse(
+        #         {'ok': False, 'error': f'Ошибка валидации: {e}'},
+        #         status=500,
+        #     )
+
+        # ---------- 3. Если есть конфликты — отдаём диалог ----------
+        # if conflicts:
+        #     return JsonResponse({
+        #         'ok': False,
+        #         'dialog': True,
+        #         'conflicts': conflicts,        # структура — на твоё усмотрение
+        #         'rows_count': len(rows),
+        #     })
+
+        # ---------- 4. Конфликтов нет — рендерим таблицу ----------
+        try:
+            api = get_ispring_api()
+            learning_track = api.get_learning_track(track_id)
+
+            # Куда-то применить cleaned_rows — реши сам:
+            # например, learning_track.apply_iva(cleaned_rows)
+            # или сразу в Table передать, если Table умеет с ними работать.
+
+            table_html = Table(learning_track).to_html()
+        except RuntimeError as e:
+            return JsonResponse({'ok': False, 'error': str(e)}, status=502)
+
+        return JsonResponse({
+            'ok': True,
+            'html': table_html,
+            'rows_count': len(rows),
+        })
