@@ -315,7 +315,7 @@ class IspringApi:
         users = {}
         modules = {}
         courses = defaultdict(list)
-        with open("data_in_user_results.json", "w", encoding="utf-8") as f:
+        with open('data_in_user_results.json', 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
 
         for item in data:
@@ -327,8 +327,14 @@ class IspringApi:
 
             user_results = UserResults(
                 user_id=item['userId'],
-                fio=f'{user.last_name} {user.first_name} {user.patronymic}'.strip(),
-                completion_status=status_compliance.get(item['completionStatus'], item['completionStatus']),
+                fio=(
+                    f'{user.last_name} '
+                    f'{user.first_name} '
+                    f'{user.patronymic}'.strip()
+                ),
+                completion_status=status_compliance.get(
+                    item['completionStatus'], item['completionStatus']
+                ),
                 progress=item.get('progress'),
                 awarded_score=item.get('awardedScore'),
                 passing_score=item.get('passingScore'),

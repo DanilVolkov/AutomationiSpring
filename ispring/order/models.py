@@ -21,21 +21,22 @@ class User(models.Model):
             f'{self.user_id} '
             f'({self.first_name} {self.last_name} {self.patronymic})'
         )
-#
-# class IvaUser(models.Model):
-#     course_id
-#     course_name
-#     lesson_id
-#     lesson_name
-#     first_name
-#     last_name
-#     patronymic
-#     other
-#     email
-#     phone
-#     entry_time
-#     exit_time
-#     duration
-#     device
-#     user_type
-#     ip_address
+
+
+class Iva(models.Model):
+    learning_track_id = models.UUIDField(verbose_name='ID траектории')
+    learning_track_name = models.CharField(
+        verbose_name='Название траектории', blank=True
+    )
+    course_id = models.UUIDField(verbose_name='ID курса')
+    course_name = models.CharField(verbose_name='Название курса', blank=True)
+    user_id = models.UUIDField(verbose_name='ID пользователя')
+    fio = models.CharField(verbose_name='ФИО пользователя', blank=True)
+    duration = models.IntegerField(verbose_name='Длительность в минутах')
+
+    def __str__(self):
+        return (
+            f'{self.learning_track_name} ({self.learning_track_id}) -> '
+            f'{self.course_id} ({self.course_name}) -> '
+            f'{self.user_id} ({self.fio}) - {self.duration}'
+        )

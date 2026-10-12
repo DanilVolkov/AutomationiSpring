@@ -1,13 +1,11 @@
 import re
-from collections import OrderedDict, defaultdict
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from django.core.cache import cache
 from django.template.loader import render_to_string
 from openpyxl import Workbook
-from openpyxl.cell import MergedCell
-from openpyxl.styles import Border, PatternFill, Side, Alignment, Font
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 status_compliance = {
@@ -40,7 +38,17 @@ class IvaUser:
         return datetime.strptime(' '.join(s.split()), '%d.%m.%Y %H:%M')
 
     @classmethod
-    def make(cls, id: str, fio: str, email: str, entry_time: str, exit_time: str, duration: str, device: str, ip_address: str):
+    def make(
+        cls,
+        id: str,
+        fio: str,
+        email: str,
+        entry_time: str,
+        exit_time: str,
+        duration: str,
+        device: str,
+        ip_address: str,
+    ):
         _entry_time = cls._str_to_datetime(entry_time)
         _exit_time = cls._str_to_datetime(exit_time)
         r = re.compile(r'(\d+)\s*час\w*\s*(\d+)\s*минут\w*', re.IGNORECASE)
@@ -48,8 +56,20 @@ class IvaUser:
         if not match:
             _duration = timedelta(0)
         else:
-            _duration = timedelta(hours=int(match.group(1)), minutes=int(match.group(2)))
-        return cls(id, fio, email, _entry_time, _exit_time, _duration, device, ip_address)
+            _duration = timedelta(
+                hours=int(match.group(1)), minutes=int(match.group(2))
+            )
+        return cls(
+            id,
+            fio,
+            email,
+            _entry_time,
+            _exit_time,
+            _duration,
+            device,
+            ip_address,
+        )
+
 
 @dataclass
 class Folder:
@@ -128,33 +148,33 @@ class Table:
         'Лекция итог',
         'ДЗ порог',
         'ДЗ прогресс',
-        'ДЗ итог'
+        'ДЗ итог',
     ]
 
     item_extensions = (
-        ".mp4",
-        ".avi",
-        ".mkv",
-        ".mov",
-        ".wmv",
-        ".flv",
-        ".webm",
-        ".m4v",
-        ".mpg",
-        ".mpeg",
-        ".3gp",
-        ".3g2",
-        ".ogv",
-        ".ts",
-        ".mts",
-        ".m2ts",
-        ".vob",
-        ".rm",
-        ".rmvb",
-        ".asf",
-        ".divx",
-        ".f4v",
-        ".swf"
+        '.mp4',
+        '.avi',
+        '.mkv',
+        '.mov',
+        '.wmv',
+        '.flv',
+        '.webm',
+        '.m4v',
+        '.mpg',
+        '.mpeg',
+        '.3gp',
+        '.3g2',
+        '.ogv',
+        '.ts',
+        '.mts',
+        '.m2ts',
+        '.vob',
+        '.rm',
+        '.rmvb',
+        '.asf',
+        '.divx',
+        '.f4v',
+        '.swf',
     )
 
     fill_map = {
@@ -162,12 +182,12 @@ class Table:
         'table-danger': 'F8D7DA',
         'table-warning': 'FFF3CD',
         'table-info': 'CFE2FF',
-        'table-primary': 'CFE2FF'
+        'table-primary': 'CFE2FF',
     }
 
     def __init__(
-            self,
-            learning_track: LearningTrack,
+        self,
+        learning_track: LearningTrack,
     ):
         self.track = learning_track
         self.track_users = self._collect_users()
@@ -181,21 +201,26 @@ class Table:
         fill = border = None
         for item in css.split():
             if item in self.fill_map:
-                fill = PatternFill(start_color=self.fill_map[item], end_color=self.fill_map[item], fill_type='solid')
+                fill = PatternFill(
+                    start_color=self.fill_map[item],
+                    end_color=self.fill_map[item],
+                    fill_type='solid',
+                )
 
         if 'border-dark' in css:
             if 'border-bottom' in css:
                 border = Border(
                     right=Side(style='medium', color='000000'),
-                    bottom=Side(style='medium', color='000000')
+                    bottom=Side(style='medium', color='000000'),
                 )
             else:
                 border = Border(right=Side(style='medium', color='000000'))
 
         return fill, border
 
-
-    def _apply_cell_style(self, excel_cell, cell: Cell, is_header: bool = False):
+    def _apply_cell_style(
+        self, excel_cell, cell: Cell, is_header: bool = False
+    ):
         fill, border = self._parse_css(cell.css)
 
         if fill:
@@ -226,23 +251,22 @@ class Table:
                 if cell.value is None:
                     continue
                 col = cell.column
-                l = cell_text_len(cell.value)
-                if l > max_len.get(col, 0):
-                    max_len[col] = l
-        for col_idx, l in max_len.items():
+                cell_length = cell_text_len(cell.value)
+                if cell_length > max_len.get(col, 0):
+                    max_len[col] = cell_length
+        for col_idx, cell_length in max_len.items():
             letter = get_column_letter(col_idx)
 
             # Эвристика:
             # - +2 символа на `воздух`
             # - масштаб по размеру шрифта
             # - маленький коэффициент для компенсации ширины кириллицы/Calibri
-            width = l + 2
+            width = cell_length + 2
 
             # Ограничим разумными границами, чтобы не улетало
             width = min(max(width, 8), 25)
 
             ws.column_dimensions[letter].width = width
-
 
     def _write_excel(self, header_top, header_bottom, rows) -> Workbook:
         wb = Workbook()
@@ -264,16 +288,16 @@ class Table:
 
             if cell.colspan > 1 or cell.rowspan > 1:
                 ws.merge_cells(
-                    start_row=1, start_column=col,
-                    end_row=end_row, end_column=end_col,
+                    start_row=1,
+                    start_column=col,
+                    end_row=end_row,
+                    end_column=end_col,
                 )
                 # Проставляем стиль всем ячейкам merge — иначе границы пропадут
                 for r in range(1, end_row + 1):
                     for c in range(col, end_col + 1):
                         self._apply_cell_style(
-                            ws.cell(row=r, column=c),
-                            cell,
-                            is_header=True
+                            ws.cell(row=r, column=c), cell, is_header=True
                         )
             col += cell.colspan
 
@@ -345,13 +369,25 @@ class Table:
 
     def _build_header_top(self, course_headers) -> list[Cell]:
         header: list[Cell] = [
-            Cell(value='№', rowspan=2, css='border-dark border-end border-bottom'),
-            Cell(value='ФИО', rowspan=2, css='border-dark border-end border-bottom'),
+            Cell(
+                value='№',
+                rowspan=2,
+                css='border-dark border-end border-bottom',
+            ),
+            Cell(
+                value='ФИО',
+                rowspan=2,
+                css='border-dark border-end border-bottom',
+            ),
         ]
 
         for course in self.track.courses:
             header.append(
-                Cell(value=course.title, colspan=len(course_headers[course.id]), css='border-dark border-end border-bottom')
+                Cell(
+                    value=course.title,
+                    colspan=len(course_headers[course.id]),
+                    css='border-dark border-end border-bottom',
+                )
             )
 
         return header
@@ -361,13 +397,19 @@ class Table:
             return 'video'
 
         if module.result_users is not None and len(module.result_users) > 0:
-            is_hw = any(map(
-                lambda x: True if (
-                        x.passing_score is not None and
-                        x.awarded_score is not None
-                ) else False,
-                module.result_users
-            ))
+            is_hw = any(
+                map(
+                    lambda x: (
+                        True
+                        if (
+                            x.passing_score is not None
+                            and x.awarded_score is not None
+                        )
+                        else False
+                    ),
+                    module.result_users,
+                )
+            )
             if is_hw:
                 return 'hw'
 
@@ -376,13 +418,31 @@ class Table:
     def _build_header_bottom(self) -> tuple[list[Cell], dict[str, list[Cell]]]:
         header: list[Cell] = []
         course_headers: dict[str, list] = defaultdict(list)
-        lecture_headers = tuple(map(lambda x: Cell(value=x, css='module border-bottom border-dark'), self.module_stub_fields[:3]))
-        hw_headers = tuple(map(lambda x: Cell(value=x, css='module border-bottom border-dark'), self.module_stub_fields[3:]))
+        lecture_headers = tuple(
+            map(
+                lambda x: Cell(
+                    value=x, css='module border-bottom border-dark'
+                ),
+                self.module_stub_fields[:3],
+            )
+        )
+        hw_headers = tuple(
+            map(
+                lambda x: Cell(
+                    value=x, css='module border-bottom border-dark'
+                ),
+                self.module_stub_fields[3:],
+            )
+        )
         for course in self.track.courses:
             if not course.modules:
                 # Пустой курс — пустая ячейка в нижней шапке.
-                header.append(Cell(value='', css='border-dark border-end border-bottom'))
-                course_headers[course.id].append(Cell(value='', css='border-dark border-end border-bottom'))
+                header.append(
+                    Cell(value='', css='border-dark border-end border-bottom')
+                )
+                course_headers[course.id].append(
+                    Cell(value='', css='border-dark border-end border-bottom')
+                )
                 continue
 
             lecture = []
@@ -392,12 +452,22 @@ class Table:
                 module_type = self._get_type_item(module)
                 if module_type == 'video' and len(lecture) == 0:
                     for c in lecture_headers:
-                        lecture.append(Cell(module_id=module.id, value=c.value, css=c.css))
+                        lecture.append(
+                            Cell(module_id=module.id, value=c.value, css=c.css)
+                        )
                 elif module_type == 'hw' and len(hw) == 0:
                     for c in hw_headers:
-                        hw.append(Cell(module_id=module.id, value=c.value, css=c.css))
+                        hw.append(
+                            Cell(module_id=module.id, value=c.value, css=c.css)
+                        )
                 else:
-                    others.append(Cell(module_id=module.id, value=module.title, css='module border-dark border-bottom'))
+                    others.append(
+                        Cell(
+                            module_id=module.id,
+                            value=module.title,
+                            css='module border-dark border-bottom',
+                        )
+                    )
 
             if len(lecture) > 0:
                 header.extend(lecture)
@@ -419,12 +489,16 @@ class Table:
             for module in course.modules:
                 for user in module.result_users:
                     if user.user_id not in users:
-                        users[user.user_id] = UserResults(user_id=user.user_id, fio=user.fio)
-        return dict(sorted(
-            users.items(), key=lambda item: (item[1].fio or '').lower()
-        ))
+                        users[user.user_id] = UserResults(
+                            user_id=user.user_id, fio=user.fio
+                        )
+        return dict(
+            sorted(users.items(), key=lambda item: (item[1].fio or '').lower())
+        )
 
-    def _build_rows(self, course_headers: dict[str, list[Cell]]) -> list[list[Cell]]:
+    def _build_rows(
+        self, course_headers: dict[str, list[Cell]]
+    ) -> list[list[Cell]]:
         rows: list[list[Cell]] = []
 
         for idx, (user_id, ur) in enumerate(self.track_users.items(), start=1):
@@ -437,6 +511,11 @@ class Table:
                 if not course.modules:
                     row.append(Cell(value='', css='empty'))
                     continue
+
+                # TODO
+                # data_iva = None
+                # durations = None
+                # duration_median = statistics.median(durations)
 
                 for header in course_headers[course.id]:
                     module: Module | None = None
@@ -455,8 +534,7 @@ class Table:
                         continue
 
                     user_results = self._find_user_results_in_module(
-                        module,
-                        user_id
+                        module, user_id
                     )
                     row.append(self._make_cell(header.value, user_results))
                 row[-1].css += ' border-dark border-end'
@@ -465,7 +543,9 @@ class Table:
         return rows
 
     @staticmethod
-    def _find_user_results_in_module(module: Module, user_id: str) -> UserResults | None:
+    def _find_user_results_in_module(
+        module: Module, user_id: str
+    ) -> UserResults | None:
         for r in module.result_users:
             if r.user_id == user_id:
                 return r
@@ -486,7 +566,11 @@ class Table:
                 # TODO: запрос в БД для данных IVA
                 user_iva = None
                 # TODO: сопоставление пользователя из IVA с текущим пользователем
-                if user_iva is None and ur.progress is not None and ur.progress >= 75.0:
+                if (
+                    user_iva is None
+                    and ur.progress is not None
+                    and ur.progress >= 75.0
+                ):
                     result = True
                 if result:
                     return Cell(value=str(int(result)), css='table-success')
@@ -496,10 +580,10 @@ class Table:
                 return Cell(value=Table._format_value(ur.passing_score))
             case 'ДЗ прогресс':
                 result = ur.progress
-                if (
-                    (ur.progress is None and ur.awarded_score is not None) or
-                    (ur.progress is not None and ur.awarded_score is not None
-                    and ur.progress != ur.awarded_score)
+                if (ur.progress is None and ur.awarded_score is not None) or (
+                    ur.progress is not None
+                    and ur.awarded_score is not None
+                    and ur.progress != ur.awarded_score
                 ):
                     result = ur.awarded_score
                 return Cell(value=Table._format_value(result))
@@ -508,8 +592,10 @@ class Table:
                 css = ''
                 if ur.completion_status is not None:
                     match ur.completion_status:
-                        case 'Не начато': css = 'table-warning'
-                        case 'В процессе': css = 'table-info'
+                        case 'Не начато':
+                            css = 'table-warning'
+                        case 'В процессе':
+                            css = 'table-info'
                         case 'Принято':
                             css = 'table-success'
                         case 'Отклонено':
@@ -532,7 +618,6 @@ class Table:
 
         return Cell(value=Table._format_value(ur.progress))
 
-
     @staticmethod
     def _format_value(value) -> str:
         if value is None:
@@ -547,7 +632,6 @@ class IvaHandler:
         self.rows: list[IvaUser] = data
         self.track_users = track_users
 
-
     def _del_duplicate_fio(self):
         unique_fio: dict[str, IvaUser] = {}
         for r in self.rows:
@@ -557,38 +641,34 @@ class IvaHandler:
                 unique_fio[r.fio] = r
         return list(unique_fio.values())
 
-
     def _del_duplicate_ip(self):
         unique_ip: dict[str, IvaUser] = {}
         for r in self.rows:
             if r.ip_address in unique_ip:
                 unique_ip[r.ip_address].duration += r.duration
                 if (
-                    len(unique_ip[r.ip_address].fio) < len(r.fio) and
-                    not unique_ip[r.ip_address].email
+                    len(unique_ip[r.ip_address].fio) < len(r.fio)
+                    and not unique_ip[r.ip_address].email
                 ):
                     unique_ip[r.ip_address].fio = r.fio
             else:
                 unique_ip[r.ip_address] = r
         return list(unique_ip.values())
 
-
     def find_user_db(self):
         for r in self.rows:
             name_participant = r.fio.split()
             for u in self.track_users.values():
                 max_count = len(u.fio.split())
-                count = len(list(filter(
-                    lambda np: np in u.fio, name_participant
-                )))
+                count = len(
+                    list(filter(lambda np: np in u.fio, name_participant))
+                )
                 if count >= max_count:
                     r.user_id_ispring = u.user_id
-
 
     def del_duplicates(self):
         self.rows = self._del_duplicate_fio()
         self.rows = self._del_duplicate_ip()
-
 
     def get_user_conflicts(self) -> list[list[IvaUser]]:
         conflicts: list[list[IvaUser]] = []
