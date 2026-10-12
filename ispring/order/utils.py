@@ -25,6 +25,7 @@ status_compliance = {
 
 @dataclass
 class IvaUser:
+    id: str
     fio: str
     email: str | None
     entry_time: datetime
@@ -39,7 +40,7 @@ class IvaUser:
         return datetime.strptime(' '.join(s.split()), '%d.%m.%Y %H:%M')
 
     @classmethod
-    def make(cls, fio: str, email: str, entry_time: str, exit_time: str, duration: str, device: str, ip_address: str):
+    def make(cls, id: str, fio: str, email: str, entry_time: str, exit_time: str, duration: str, device: str, ip_address: str):
         _entry_time = cls._str_to_datetime(entry_time)
         _exit_time = cls._str_to_datetime(exit_time)
         r = re.compile(r'(\d+)\s*час\w*\s*(\d+)\s*минут\w*', re.IGNORECASE)
@@ -48,7 +49,7 @@ class IvaUser:
             _duration = timedelta(0)
         else:
             _duration = timedelta(hours=int(match.group(1)), minutes=int(match.group(2)))
-        return cls(fio, email, _entry_time, _exit_time, _duration, device, ip_address)
+        return cls(id, fio, email, _entry_time, _exit_time, _duration, device, ip_address)
 
 @dataclass
 class Folder:
@@ -539,3 +540,62 @@ class Table:
         if isinstance(value, float) and value.is_integer():
             return str(int(value))
         return str(value)
+
+
+class IvaHandler:
+    def __init__(self, data, track_users):
+        self.rows: list[IvaUser] = data
+        self.track_users = track_users
+
+
+    def _del_duplicate_fio(self):
+        unique_fio: dict[str, IvaUser] = {}
+        for r in self.rows:
+            if r.fio in unique_fio:
+                unique_fio[r.fio].duration += r.duration
+            else:
+                unique_fio[r.fio] = r
+        return list(unique_fio.values())
+
+
+    def _del_duplicate_ip(self):
+        unique_ip: dict[str, IvaUser] = {}
+        for r in self.rows:
+            if r.ip_address in unique_ip:
+                unique_ip[r.ip_address].duration += r.duration
+                if (
+                    len(unique_ip[r.ip_address].fio) < len(r.fio) and
+                    not unique_ip[r.ip_address].email
+                ):
+                    unique_ip[r.ip_address].fio = r.fio
+            else:
+                unique_ip[r.ip_address] = r
+        return list(unique_ip.values())
+
+
+    def find_user_db(self):
+        for r in self.rows:
+            name_participant = r.fio.split()
+            for u in self.track_users.values():
+                max_count = len(u.fio.split())
+                count = len(list(filter(
+                    lambda np: np in u.fio, name_participant
+                )))
+                if count >= max_count:
+                    r.user_id_ispring = u.user_id
+
+
+    def del_duplicates(self):
+        self.rows = self._del_duplicate_fio()
+        self.rows = self._del_duplicate_ip()
+
+
+    def get_user_conflicts(self) -> list[list[IvaUser]]:
+        conflicts: list[list[IvaUser]] = []
+        for row_1 in self.rows:
+            for row_2 in self.rows:
+                if row_1 == row_2:
+                    continue
+                if row_1.fio in row_2.fio:
+                    conflicts.append([row_1, row_2])
+        return conflicts

@@ -2,14 +2,16 @@ import csv
 import io
 import json
 import tempfile
+import uuid
 from collections import defaultdict
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from io import BytesIO
 
 from django.core.cache import cache
 from django.db import connection
 from django.http import JsonResponse, FileResponse
+from django.shortcuts import render
 from django.template.loader import render_to_string
 from django.views import View
 from django.views.generic import TemplateView
@@ -17,7 +19,7 @@ from ispring.settings import ISPRING_DEFAULT_FOLDER_ID
 
 from order.models import User
 from order.services import get_ispring_api
-from order.utils import Table, IvaUser
+from order.utils import Table, IvaUser, IvaHandler
 
 
 # class OrderHome(TemplateView):
@@ -253,9 +255,7 @@ class TrackUploadIvaView(View):
         csv_file = request.FILES.get('file')
         if not csv_file:
             return JsonResponse(
-                {'ok': False, 'error': 'Файл не передан'},
-                status=400,
-            )
+                {'ok': False, 'error': 'Файл не передан'}, status=400)
 
         try:
             raw = csv_file.read()
@@ -267,119 +267,340 @@ class TrackUploadIvaView(View):
                     pass
             else:
                 return JsonResponse(
-                    {'ok': False, 'error': 'Не удалось определить кодировку файла'},
-                    status=400,
-                )
+                    {'ok': False, 'error': 'Не удалось определить кодировку'},
+                    status=400)
 
             reader = csv.DictReader(io.StringIO(text), delimiter=';')
             rows = list(reader)
         except Exception as e:
             return JsonResponse(
-                {'ok': False, 'error': f'Ошибка чтения CSV: {e}'},
-                status=400,
-            )
+                {'ok': False, 'error': f'Ошибка чтения CSV: {e}'}, status=400)
 
-        # Удаление дубликатов
         track_users = table.track_users
-        rows = list(map(
-            lambda r: IvaUser.make(
+
+        iva_rows = [
+            IvaUser.make(
+                id=str(uuid.uuid4()),
                 fio=r['Имя участника'],
                 email=r['Email/телефон'],
                 entry_time=r['Время входа'],
                 exit_time=r['Время выхода'],
                 duration=r['Длительность'],
                 device=r['Тип оборудования'],
-                ip_address=r['IP-адрес']
-            ), rows
-        ))
-        unique_fio: dict[str, IvaUser] = {}
-        for r in rows:
-            if r.fio in unique_fio:
-                unique_fio[r.fio].duration += r.duration
-            else:
-                unique_fio[r.fio] = r
-        rows = list(unique_fio.values())
+                ip_address=r['IP-адрес'],
+            )
+            for r in rows
+        ]
 
-        unique_ip: dict[str, IvaUser] = {}
-        for r in rows:
-            if r.ip_address in unique_ip:
-                unique_ip[r.ip_address].duration += r.duration
-                if len(unique_ip[r.ip_address].fio) < len(r.fio) and not unique_ip[r.ip_address].email:
-                    unique_ip[r.ip_address].fio = r.fio
-            else:
-                unique_ip[r.ip_address] = r
-        rows = list(unique_ip.values())
+        iva_handler = IvaHandler(iva_rows, track_users)
+        iva_handler.del_duplicates()
+        iva_handler.find_user_db()
+        conflicts = iva_handler.get_user_conflicts()
 
-        for r in rows:
-            name_participant = r.fio.split()
-            for u in track_users.values():
-                max_count = len(u.fio.split())
-                count = len(list(filter(
-                    lambda np: np in u.fio, name_participant
-                )))
-                if count >= max_count:
-                    r.user_id_ispring = u.user_id
-
-        for row in rows:
-            print(f'fio: {row.fio}; user_id_ispring: {row.user_id_ispring}')
-
-        conflicts = defaultdict(list)
-        for row_1 in rows:
-            for row_2 in rows:
-                if row_1 == row_2:
-                    continue
-                if row_1.fio in row_2.fio:
-                    conflicts[row_1.fio].append(row_2.fio)
-
-        # TODO: один и тот же человек или нет - решает пользователь в диалоге с ним
-        # Диалог в формате опроса на 1 странице - это один и тот же человек или нет?
-        # Далее мы получаем от пользователя форму и обрабатываем её.
-        # При обработке сопоставляем, какой выбор сделал пользователь и учитываем
-        # у кого удалить дубликат и сложить имя, а кого оставить.
-        # Далее уже показываем пользователю итоговую таблицу.
-
-
-
-
-
-
-
-
-
-
-        # try:
-        #     cleaned_rows, conflicts = validate_iva_rows(rows)
-        # except Exception as e:
-        #     logger.exception('Ошибка валидации IVA')
-        #     return JsonResponse(
-        #         {'ok': False, 'error': f'Ошибка валидации: {e}'},
-        #         status=500,
-        #     )
-
-        # ---------- 3. Если есть конфликты — отдаём диалог ----------
-        # if conflicts:
-        #     return JsonResponse({
-        #         'ok': False,
-        #         'dialog': True,
-        #         'conflicts': conflicts,        # структура — на твоё усмотрение
-        #         'rows_count': len(rows),
-        #     })
-
-        # ---------- 4. Конфликтов нет — рендерим таблицу ----------
-        try:
-            api = get_ispring_api()
-            learning_track = api.get_learning_track(track_id)
-
-            # Куда-то применить cleaned_rows — реши сам:
-            # например, learning_track.apply_iva(cleaned_rows)
-            # или сразу в Table передать, если Table умеет с ними работать.
-
-            table_html = Table(learning_track).to_html()
-        except RuntimeError as e:
-            return JsonResponse({'ok': False, 'error': str(e)}, status=502)
+        cache.set(f'iva_rows', iva_handler.rows)
+        cache.set(f'iva_conflicts', conflicts)
 
         return JsonResponse({
             'ok': True,
-            'html': table_html,
-            'rows_count': len(rows),
+            'redirect': f'/track/{track_id}/iva-select-course/',
+            'rows_count': len(iva_rows),
+            'conflicts_count': len(conflicts),
         })
+
+class TrackIvaSelectCoursePageView(TemplateView):
+    template_name = 'order/track_iva_select_course.html'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['track_id'] = self.kwargs['track_id']
+        return context
+
+class TrackIvaSelectCourseDataView(View):
+    """Отдаёт JSON со списком курсов траектории."""
+
+    def get(self, request, track_id, *args, **kwargs):
+        table = cache.get('table')
+        if table is None or table.track.id != track_id:
+            return JsonResponse(
+                {'ok': False, 'error': 'Данных нет'}, status=404)
+
+        try:
+            courses = [
+                {
+                    'id': c.id,
+                    'title': c.title,
+                }
+                for c in (table.track.courses or [])
+            ]
+        except Exception as e:
+            return JsonResponse(
+                {'ok': False, 'error': f'Ошибка чтения курсов: {e}'}, status=500)
+
+        return JsonResponse({'ok': True, 'courses': courses})
+
+class TrackIvaSelectCourseApplyView(View):
+    """POST: пользователь выбрал курс. Кэширует и возвращает redirect."""
+
+    def post(self, request, track_id, *args, **kwargs):
+        try:
+            payload = json.loads(request.body or '{}')
+        except json.JSONDecodeError:
+            return JsonResponse(
+                {'ok': False, 'error': 'Некорректный JSON'}, status=400)
+
+        course_id = payload.get('course_id')
+        if not course_id:
+            return JsonResponse(
+                {'ok': False, 'error': 'Курс не выбран'}, status=400)
+
+        cache.set(f'course_id', course_id)
+
+        # ---------- Решаем, куда идти ----------
+        conflicts = cache.get(f'iva_conflicts') or []
+        if conflicts:
+            redirect_url = f'/track/{track_id}/iva-conflicts/'
+        else:
+            redirect_url = f'/track/{track_id}/iva-final/'
+
+        return JsonResponse({
+            'ok': True,
+            'redirect': redirect_url,
+        })
+
+class TrackIvaConflictsPageView(TemplateView):
+    template_name = 'order/track_iva_conflicts.html'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['track_id'] = self.kwargs['track_id']
+        return context
+
+class TrackIvaConflictsDataView(View):
+    """Отдаёт JSON со списком конфликтов — пар IvaUser."""
+
+    def get(self, request, track_id, *args, **kwargs):
+        conflicts = cache.get(f'iva_conflicts')
+        if conflicts is None:
+            return JsonResponse(
+                {'ok': False, 'error': 'Конфликтов нет'}, status=404)
+
+        def serialize(u: IvaUser) -> dict:
+            return {
+                'id': u.id,
+                'fio': u.fio,
+                'email': u.email or '',
+                'entry_time': u.entry_time.strftime('%d.%m.%Y %H:%M'),
+                'exit_time': u.exit_time.strftime('%d.%m.%Y %H:%M'),
+                'duration': self._fmt_duration(u.duration),
+                'device': u.device,
+                'ip_address': u.ip_address,
+                'user_id_ispring': u.user_id_ispring,
+            }
+
+        data = []
+        for i, pair in enumerate(conflicts):
+            left, right = pair[0], pair[1]
+            data.append({
+                'index': i,
+                'left': serialize(left),
+                'right': serialize(right),
+            })
+
+        return JsonResponse({'ok': True, 'conflicts': data})
+
+    @staticmethod
+    def _fmt_duration(td: timedelta) -> str:
+        total = int(td.total_seconds())
+        h, rem = divmod(total, 3600)
+        m = rem // 60
+        return f'{h} ч {m} мин'
+
+
+class TrackIvaConflictsResolveView(View):
+    """
+    POST: пользователь сделал выбор по каждому конфликту.
+    Для каждой пары:
+      - выбранный IvaUser остаётся в iva_rows;
+      - невыбранный удаляется по id.
+    """
+
+    def post(self, request, track_id, *args, **kwargs):
+        try:
+            payload = json.loads(request.body or '{}')
+        except json.JSONDecodeError:
+            return JsonResponse(
+                {'ok': False, 'error': 'Некорректный JSON'}, status=400)
+
+        choices = payload.get('choices', {})     # {index: 'left' | 'right'}
+
+        conflicts = cache.get(f'iva_conflicts') or []
+        iva_rows = cache.get(f'iva_rows') or []
+
+        if not iva_rows:
+            return JsonResponse(
+                {'ok': False, 'error': 'Нет данных для разрешения'},
+                status=404)
+
+        # ---------- Собираем id для удаления ----------
+        to_remove_ids: set[str] = set()
+
+        for idx_str, side in choices.items():
+            try:
+                idx = int(idx_str)
+                left, right = conflicts[idx][0], conflicts[idx][1]
+            except (ValueError, IndexError):
+                continue
+
+            if side == 'left':
+                to_remove_ids.add(right.id)       # удалить правого
+            elif side == 'right':
+                to_remove_ids.add(left.id)        # удалить левого
+
+        # ---------- Фильтруем по id ----------
+        iva_rows = [row for row in iva_rows if row.id not in to_remove_ids]
+
+        # ---------- Обновляем кэш ----------
+        cache.set(f'iva_rows', iva_rows)
+        cache.delete(f'iva_conflicts')
+
+        return JsonResponse({
+            'ok': True,
+            'redirect': f'/track/{track_id}/iva-final/',
+            'removed': len(to_remove_ids),
+        })
+
+    @staticmethod
+    def _find_pos(iva_rows: list[IvaUser], target: IvaUser) -> int:
+        """
+        Ищет позицию объекта в списке.
+        Сравниваем по ссылке (is), чтобы не поймать ложное совпадение
+        по == у dataclass.
+        """
+        for i, row in enumerate(iva_rows):
+            if row is target:
+                return i
+        return -1
+
+class TrackIvaFinalPageView(TemplateView):
+    template_name = 'order/track_iva_final.html'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['track_id'] = self.kwargs['track_id']
+        return context
+
+class TrackIvaFinalDataView(View):
+    """Отдаёт JSON с финальными IVA-строками и списком пользователей iSpring."""
+
+    def get(self, request, track_id, *args, **kwargs):
+        iva_rows = cache.get(f'iva_rows')
+        if iva_rows is None:
+            return JsonResponse(
+                {'ok': False,
+                 'error': 'Нет данных для редактирования'},
+                status=404)
+
+        db_users = [
+            {
+                'id': u.user_id,
+                'fio': u.fio,
+            }
+            for u in cache.get('table').track_users.values()
+        ]
+
+        data = [
+            {
+                'id': row.id,
+                'index': i,
+                'fio': row.fio,
+                'email': row.email or '',
+                'entry_time': row.entry_time.strftime('%d.%m.%Y %H:%M'),
+                'exit_time': row.exit_time.strftime('%d.%m.%Y %H:%M'),
+                'duration_minutes': int(row.duration.total_seconds() // 60),
+                # ←
+                'device': row.device,
+                'ip_address': row.ip_address,
+                'user_id_ispring': row.user_id_ispring,
+            }
+            for i, row in enumerate(iva_rows)
+        ]
+
+        return JsonResponse(
+            {'ok': True, 'iva_users': data, 'db_users': db_users})
+
+    @staticmethod
+    def _fmt_duration(td):
+        total = int(td.total_seconds())
+        h, rem = divmod(total, 3600)
+        m = rem // 60
+        return f'{h} ч {m} мин'
+
+class TrackIvaApplyView(View):
+    """POST: пересобирает iva_rows из присланного списка."""
+
+    def post(self, request, track_id, *args, **kwargs):
+        try:
+            payload = json.loads(request.body or '{}')
+        except json.JSONDecodeError:
+            return JsonResponse(
+                {'ok': False, 'error': 'Некорректный JSON'}, status=400)
+
+        rows = payload.get('rows', [])
+        if not isinstance(rows, list):
+            return JsonResponse(
+                {'ok': False, 'error': 'Некорректный формат rows'},
+                status=400)
+
+        iva_rows = cache.get(f'iva_rows') or []
+        by_id = {r.id: r for r in iva_rows}
+
+        new_rows: list[IvaUser] = []
+
+        for item in rows:
+            try:
+                row = by_id[item['id']]
+
+                # обновляем поля
+                row.fio          = item.get('fio', row.fio)
+                row.email        = item.get('email') or None
+                row.device       = item.get('device', row.device)
+                row.ip_address   = item.get('ip_address', row.ip_address)
+                row.user_id_ispring = item.get('user_id_ispring') or None
+
+                # время
+                row.entry_time = self._parse_dt(item.get('entry_time'))
+                row.exit_time  = self._parse_dt(item.get('exit_time'))
+
+                # длительность
+                minutes = int(item.get('duration_minutes') or 0)
+                row.duration = timedelta(minutes=minutes)
+
+                new_rows.append(row)
+
+            except (KeyError, ValueError, TypeError):
+                continue
+
+        cache.set(f'iva_rows', new_rows)
+        course_id = cache.get(f'course_id')
+
+        # TODO: запрос на добавление в БД
+
+        return JsonResponse({
+            'ok': True,
+            'redirect': f'/track/{track_id}/',
+        })
+
+    @staticmethod
+    def _parse_dt(value: str):
+        from datetime import datetime
+        return datetime.strptime(' '.join(value.split()), '%d.%m.%Y %H:%M')
+
+
+class TrackIvaCancelView(View):
+    """POST: очищает все данные, связанные с загрузкой IVA."""
+
+    def post(self, request, track_id, *args, **kwargs):
+        cache.delete(f'iva_rows')
+        cache.delete(f'iva_conflicts')
+        return JsonResponse({'ok': True})
+

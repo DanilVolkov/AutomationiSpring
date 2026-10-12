@@ -1,0 +1,176 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block mainmenu %}
+<header class="p-3 text-bg-light">
+    <div class="d-flex justify-content-center">
+        <h1 class="h5 mb-0">Выбор курса траектории</h1>
+    </div>
+</header>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4 px-4">
+
+    <div id="courses-container">
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status"></div>
+            <div class="text-muted mt-3">Загрузка списка курсов...</div>
+        </div>
+    </div>
+
+    <div class="d-flex justify-content-end gap-3 mt-5 mb-5 pt-3 border-top">
+        <button type="button" id="btn-cancel" class="btn btn-outline-secondary">
+            Отменить загрузку
+        </button>
+        <button type="button" id="btn-next" class="btn btn-primary" disabled>
+            Далее
+        </button>
+    </div>
+
+</div>
+
+<div id="toast-container"
+     class="toast-container position-fixed bottom-0 end-0 p-3"
+     style="z-index: 1080;"></div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const trackId = "{{ track_id|escapejs }}";
+    const container = document.getElementById('courses-container');
+    const btnNext = document.getElementById('btn-next');
+    const btnCancel = document.getElementById('btn-cancel');
+    const toastContainer = document.getElementById('toast-container');
+
+    let selectedCourseId = null;
+
+    function getCsrfToken() {
+        const m = document.cookie.match(/csrftoken=([^;]+)/);
+        return m ? m[1] : '';
+    }
+
+    function showToast(msg, type, duration = null) {
+        const cls = {
+            success: 'text-bg-success',
+            danger:  'text-bg-danger',
+            info:    'text-bg-primary',
+        }[type] || 'text-bg-secondary';
+
+        const el = document.createElement('div');
+        el.className = `toast align-items-center ${cls} border-0`;
+        el.innerHTML = `<div class="d-flex">
+            <div class="toast-body">${msg}</div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto"
+                    data-bs-dismiss="toast"></button>
+        </div>`;
+        toastContainer.appendChild(el);
+        const t = new bootstrap.Toast(el, { autohide: false });
+        t.show();
+
+        let timer = null;
+        if (typeof duration === 'number' && duration > 0) {
+            timer = setTimeout(() => t.hide(), duration);
+        }
+        el.addEventListener('hidden.bs.toast', () => {
+            if (timer) clearTimeout(timer);
+            el.remove();
+        });
+    }
+
+    // ---------- Загрузка курсов ----------
+    fetch(`/track/${encodeURIComponent(trackId)}/iva-select-course/data/`, {
+        headers: {'X-Requested-With': 'XMLHttpRequest'},
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (!data.ok) {
+            container.innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
+            return;
+        }
+        renderCourses(data.courses);
+    })
+    .catch(err => {
+        container.innerHTML = `<div class="alert alert-danger">${err.message}</div>`;
+    });
+
+    function renderCourses(courses) {
+        if (!courses.length) {
+            container.innerHTML = `<div class="alert alert-info">В траектории нет курсов.</div>`;
+            return;
+        }
+
+        container.innerHTML = `
+            <div class="row justify-content-center">
+                <div class="col-12 col-md-8 col-lg-6">
+                    <p class="text-muted text-center">
+                        Выберите курс, в который нужно добавить содержимое файла.
+                    </p>
+                    <div class="list-group"></div>
+                </div>
+            </div>`;
+
+        const list = container.querySelector('.list-group');
+
+        courses.forEach(c => {
+            const item = document.createElement('label');
+            item.className = 'list-group-item d-flex align-items-center gap-3';
+            item.style.cursor = 'pointer';
+
+            item.innerHTML = `
+                <input type="radio" name="course" class="form-check-input mt-0"
+                       value="${c.id}">
+                <div class="flex-grow-1">
+                    <div class="fw-semibold">${c.title}</div>
+                </div>`;
+
+            const radio = item.querySelector('input');
+            radio.addEventListener('change', function () {
+                selectedCourseId = c.id;
+                btnNext.disabled = false;
+            });
+
+            list.appendChild(item);
+        });
+    }
+
+    // ---------- Далее ----------
+    btnNext.addEventListener('click', function () {
+        if (!selectedCourseId) return;
+
+        btnNext.disabled = true;
+
+        fetch(`/track/${encodeURIComponent(trackId)}/iva-select-course/apply/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCsrfToken(),
+            },
+            body: JSON.stringify({ course_id: selectedCourseId }),
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (!data.ok) {
+                showToast('Ошибка: ' + (data.error || 'неизвестная'), 'danger');
+                btnNext.disabled = false;
+                return;
+            }
+            window.location.href = data.redirect;
+        })
+        .catch(err => {
+            showToast('Ошибка сети: ' + err.message, 'danger');
+            btnNext.disabled = false;
+        });
+    });
+
+    // ---------- Отмена ----------
+    btnCancel.addEventListener('click', function () {
+        fetch(`/track/${encodeURIComponent(trackId)}/iva-cancel/`, {
+            method: 'POST',
+            headers: { 'X-CSRFToken': getCsrfToken() },
+        }).finally(() => {
+            window.location.href = `/track/${trackId}/`;
+        });
+    });
+});
+</script>
+{% endblock %}

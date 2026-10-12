@@ -1,0 +1,676 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block mainmenu %}
+<header class="p-3 text-bg-light">
+    <div class="d-flex justify-content-center">
+        <h1 class="h5 mb-0">Редактирование данных</h1>
+    </div>
+</header>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4 px-4">
+
+    {# ---------- Панель действий ---------- #}
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <div class="d-flex gap-2 flex-wrap">
+            <button type="button"
+                    id="btn-undo"
+                    class="btn btn-outline-primary"
+                    disabled
+                    title="Нечего отменять">
+                ↶ Отменить
+            </button>
+
+            <button type="button"
+                    id="btn-redo"
+                    class="btn btn-outline-primary"
+                    disabled
+                    title="Нечего повторить">
+                ↷ Повторить
+            </button>
+
+            <button type="button"
+                    id="btn-merge-duration"
+                    class="btn btn-outline-primary"
+                    disabled>
+                Сложить длительности выделенных
+            </button>
+
+            <span id="selected-info" class="text-muted small align-self-center"></span>
+        </div>
+
+        <div class="d-flex gap-2">
+            <button type="button" id="btn-cancel" class="btn btn-outline-secondary">
+                Выйти без сохранения
+            </button>
+            <button type="button" id="btn-apply" class="btn btn-primary">
+                Применить
+            </button>
+        </div>
+    </div>
+
+    <div id="iva-table-container">
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status"></div>
+            <div class="text-muted mt-3">Загрузка данных…</div>
+        </div>
+    </div>
+
+</div>
+
+<div id="toast-container"
+     class="toast-container position-fixed bottom-0 end-0 p-3"
+     style="z-index: 1080;"></div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const trackId = "{{ track_id|escapejs }}";
+    const container = document.getElementById('iva-table-container');
+    const btnApply = document.getElementById('btn-apply');
+    const btnCancel = document.getElementById('btn-cancel');
+    const btnMerge = document.getElementById('btn-merge-duration');
+    const btnUndo = document.getElementById('btn-undo');
+    const btnRedo = document.getElementById('btn-redo');
+    const selectedInfo = document.getElementById('selected-info');
+    const toastContainer = document.getElementById('toast-container');
+
+    let dbUsers = [];
+    let rows = [];
+
+    // ==================== История изменений ====================
+    const undoStack = [];
+    const redoStack = [];
+    const HISTORY_LIMIT = 100;
+
+    function deepCopyRows() {
+        return rows.map(r => ({ ...r }));
+    }
+
+    function snapshot(label = '') {
+        undoStack.push({ label, state: deepCopyRows() });
+        if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
+
+        redoStack.length = 0;
+        updateHistoryButtons();
+    }
+
+    function undo() {
+        if (!undoStack.length) return;
+
+        const last = undoStack.pop();
+        redoStack.push({ label: last.label, state: deepCopyRows() });
+        if (redoStack.length > HISTORY_LIMIT) redoStack.shift();
+
+        rows = last.state.map(r => ({ ...r }));
+        renderTable();
+        updateHistoryButtons();
+
+        // Если пользователь уже пытался применить — пересчитать
+        if (btnApply.dataset.checked) {
+            btnApply.dataset.confirmed = '';
+            highlightMissingRows();
+            updateApplyButton();
+        }
+
+        showToast(`Отменено: ${last.label || 'последнее действие'}`, 'info', 5000);
+    }
+
+    function redo() {
+        if (!redoStack.length) return;
+
+        const last = redoStack.pop();
+        undoStack.push({ label: last.label, state: deepCopyRows() });
+        if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
+
+        rows = last.state.map(r => ({ ...r }));
+        renderTable();
+        updateHistoryButtons();
+
+        if (btnApply.dataset.checked) {
+            btnApply.dataset.confirmed = '';
+            highlightMissingRows();
+            updateApplyButton();
+        }
+
+        showToast(`Повторено: ${last.label || 'действие'}`, 'info', 5000);
+    }
+
+    function updateHistoryButtons() {
+        if (btnUndo) {
+            btnUndo.disabled = undoStack.length === 0;
+            btnUndo.title = undoStack.length
+                ? `Отменить: ${undoStack[undoStack.length - 1].label}`
+                : 'Нечего отменять';
+        }
+        if (btnRedo) {
+            btnRedo.disabled = redoStack.length === 0;
+            btnRedo.title = redoStack.length
+                ? `Повторить: ${redoStack[redoStack.length - 1].label}`
+                : 'Нечего повторить';
+        }
+    }
+
+    // ==================== Утилиты ====================
+    function getCsrfToken() {
+        const m = document.cookie.match(/csrftoken=([^;]+)/);
+        return m ? m[1] : '';
+    }
+
+    function showToast(msg, type, duration = null) {
+        const cls = {
+            success: 'text-bg-success',
+            danger:  'text-bg-danger',
+            info:    'text-bg-primary',
+            warning: 'text-bg-warning',
+        }[type] || 'text-bg-secondary';
+
+        const el = document.createElement('div');
+        el.className = `toast align-items-center ${cls} border-0`;
+        el.setAttribute('role', 'alert');
+        el.innerHTML = `<div class="d-flex">
+            <div class="toast-body">${msg}</div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto"
+                    data-bs-dismiss="toast" aria-label="Закрыть"></button>
+        </div>`;
+
+        toastContainer.appendChild(el);
+
+        const t = new bootstrap.Toast(el, { autohide: false });
+        t.show();
+
+        let timer = null;
+        if (typeof duration === 'number' && duration > 0) {
+            timer = setTimeout(() => t.hide(), duration);
+        }
+
+        el.addEventListener('hidden.bs.toast', () => {
+            if (timer) clearTimeout(timer);
+            el.remove();
+        });
+    }
+
+    function fmtMinutes(total) {
+        const h = Math.floor(total / 60);
+        const m = total % 60;
+        return `${h} ч ${m} мин`;
+    }
+
+    // ==================== Проверка пропусков ====================
+    function findMissingUserRows() {
+        const missing = [];
+        rows.forEach((row, i) => {
+            if (row.deleted) return;
+            if (!row.user_id_ispring) missing.push(i);
+        });
+        return missing;
+    }
+
+    function highlightMissingRows() {
+        document.querySelectorAll('#iva-body tr').forEach(tr => {
+            tr.classList.remove('table-warning');
+            const inp = tr.querySelector('.user-select-wrap input.form-control');
+            if (inp) inp.classList.remove('is-invalid');
+        });
+
+        const missing = findMissingUserRows();
+
+        missing.forEach(i => {
+            const tr = document.querySelector(`#iva-body tr[data-index="${i}"]`);
+            if (!tr) return;
+
+            tr.classList.add('table-warning');
+
+            const inp = tr.querySelector('.user-select-wrap input.form-control');
+            if (inp) {
+                inp.classList.add('is-invalid');
+                inp.title = 'Не выбран пользователь iSpring';
+            }
+        });
+
+        return missing.length > 0;
+    }
+
+    function updateApplyButton() {
+        // Пока не было попытки применить — кнопка всегда «Применить» (синяя)
+        if (!btnApply.dataset.checked) {
+            btnApply.textContent = 'Применить';
+            btnApply.classList.remove('btn-warning');
+            btnApply.classList.add('btn-primary');
+            return;
+        }
+
+        const hasMissing = findMissingUserRows().length > 0;
+        btnApply.textContent = hasMissing ? 'Всё равно применить' : 'Применить';
+        btnApply.classList.toggle('btn-warning', hasMissing);
+        btnApply.classList.toggle('btn-primary', !hasMissing);
+    }
+
+    // ==================== Загрузка данных ====================
+    fetch(`/track/${encodeURIComponent(trackId)}/iva-final/data/`, {
+        headers: {'X-Requested-With': 'XMLHttpRequest'},
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (!data.ok) {
+            container.innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
+            return;
+        }
+        dbUsers = data.db_users;
+        rows = data.iva_users.map(r => ({ ...r, deleted: false }));
+        renderTable();
+        updateHistoryButtons();
+        // updateApplyButton() НЕ вызываем — кнопка остаётся «Применить»
+    })
+    .catch(err => {
+        container.innerHTML = `<div class="alert alert-danger">${err.message}</div>`;
+    });
+
+    // ==================== Отрисовка таблицы ====================
+    function renderTable() {
+        container.innerHTML = `
+            <div class="table-responsive">
+                <table class="table table-sm table-bordered table-hover iva-table align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th class="col-select" style="width:30px;text-align:center;">
+                                <input type="checkbox" id="select-all-merge"
+                                       title="Выделить всё для сложения">
+                            </th>
+                            <th>ФИО</th>
+                            <th>Email</th>
+                            <th>Вход</th>
+                            <th>Выход</th>
+                            <th>Длительность</th>
+                            <th>Устройство</th>
+                            <th>IP</th>
+                            <th>Пользователь iSpring</th>
+                            <th class="col-delete" style="width:40px;text-align:center;"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="iva-body"></tbody>
+                </table>
+            </div>`;
+
+        const body = document.getElementById('iva-body');
+        rows.forEach((row, i) => {
+            if (row.deleted) return;
+            body.appendChild(buildRow(row, i));
+        });
+
+        // Если пользователь уже пытался применить — восстановить подсветку
+        if (btnApply.dataset.checked) {
+            highlightMissingRows();
+        }
+
+        const selAll = document.getElementById('select-all-merge');
+        if (selAll) {
+            selAll.addEventListener('change', function () {
+                document.querySelectorAll('.iva-row-select').forEach(cb => {
+                    cb.checked = selAll.checked;
+                });
+                updateMergeButton();
+            });
+        }
+    }
+
+    // ==================== Строка таблицы ====================
+    function buildRow(row, index) {
+        const tr = document.createElement('tr');
+        tr.dataset.index = index;
+
+        // ---------- Чекбокс merge ----------
+        const tdSelect = document.createElement('td');
+        tdSelect.className = 'col-select';
+        tdSelect.style.textAlign = 'center';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.className = 'iva-row-select form-check-input';
+        cb.addEventListener('change', updateMergeButton);
+        tdSelect.appendChild(cb);
+        tr.appendChild(tdSelect);
+
+        // ---------- ФИО ----------
+        tr.appendChild(buildInputCell(row, index, 'fio'));
+
+        // ---------- Email ----------
+        tr.appendChild(buildInputCell(row, index, 'email'));
+
+        // ---------- Вход / Выход ----------
+        tr.appendChild(buildInputCell(row, index, 'entry_time'));
+        tr.appendChild(buildInputCell(row, index, 'exit_time'));
+
+        // ---------- Длительность ----------
+        const tdDur = document.createElement('td');
+        const inpDur = document.createElement('input');
+        inpDur.type = 'number';
+        inpDur.min = 0;
+        inpDur.className = 'form-control form-control-sm';
+        inpDur.value = row.duration_minutes;
+        inpDur.title = fmtMinutes(row.duration_minutes);
+
+        let durSnapshotted = false;
+        inpDur.addEventListener('focus', function () {
+            if (!durSnapshotted) {
+                snapshot('изменение длительности');
+                durSnapshotted = true;
+            }
+        });
+        inpDur.addEventListener('input', function () {
+            rows[index].duration_minutes = Number(inpDur.value) || 0;
+            inpDur.title = fmtMinutes(rows[index].duration_minutes);
+        });
+        inpDur.addEventListener('blur', function () {
+            durSnapshotted = false;
+        });
+
+        tdDur.appendChild(inpDur);
+        tr.appendChild(tdDur);
+
+        // ---------- Устройство / IP ----------
+        tr.appendChild(buildInputCell(row, index, 'device'));
+        tr.appendChild(buildInputCell(row, index, 'ip_address'));
+
+        // ---------- Пользователь iSpring ----------
+        const tdUser = document.createElement('td');
+        tdUser.appendChild(buildUserSelect(row, index));
+        tr.appendChild(tdUser);
+
+        // ---------- Удалить ----------
+        const tdDel = document.createElement('td');
+        tdDel.className = 'col-delete';
+        tdDel.style.textAlign = 'center';
+        const btnDel = document.createElement('button');
+        btnDel.type = 'button';
+        btnDel.className = 'btn btn-sm btn-outline-danger';
+        btnDel.innerHTML = '&times;';
+        btnDel.title = 'Удалить строку';
+        btnDel.addEventListener('click', function () {
+            snapshot('удаление строки');
+            rows[index].deleted = true;
+            renderTable();
+
+            // Если уже была проверка — обновить
+            if (btnApply.dataset.checked) {
+                btnApply.dataset.confirmed = '';
+                highlightMissingRows();
+                updateApplyButton();
+            }
+        });
+        tdDel.appendChild(btnDel);
+        tr.appendChild(tdDel);
+
+        return tr;
+    }
+
+    // ==================== Ячейка с текстовым инпутом ====================
+    function buildInputCell(row, index, field) {
+        const td = document.createElement('td');
+        const inp = document.createElement('input');
+        inp.type = 'text';
+        inp.className = 'form-control form-control-sm';
+        inp.value = row[field] || '';
+
+        let snapshotted = false;
+        inp.addEventListener('focus', function () {
+            if (!snapshotted) {
+                snapshot(`изменение «${field}»`);
+                snapshotted = true;
+            }
+        });
+        inp.addEventListener('input', function () {
+            rows[index][field] = inp.value;
+        });
+        inp.addEventListener('blur', function () {
+            snapshotted = false;
+        });
+
+        td.appendChild(inp);
+        return td;
+    }
+
+    // ==================== Выбор пользователя iSpring ====================
+    function buildUserSelect(row, index) {
+        const wrap = document.createElement('div');
+        wrap.className = 'dropdown user-select-wrap';
+        wrap.style.minWidth = '220px';
+
+        const display = document.createElement('input');
+        display.type = 'text';
+        display.className = 'form-control form-control-sm dropdown-toggle';
+        display.placeholder = '— не выбран —';
+        display.autocomplete = 'off';
+        display.value = currentFio(row.user_id_ispring);
+        display.setAttribute('data-bs-toggle', 'dropdown');
+        display.setAttribute('data-bs-auto-close', 'outside');
+        display.setAttribute('data-bs-strategy', 'fixed');
+
+        const hidden = document.createElement('input');
+        hidden.type = 'hidden';
+        hidden.value = row.user_id_ispring || '';
+
+        const list = document.createElement('ul');
+        list.className = 'dropdown-menu w-100 user-select-list';
+        list.style.maxHeight = '240px';
+        list.style.overflowY = 'auto';
+
+        wrap.appendChild(display);
+        wrap.appendChild(hidden);
+        wrap.appendChild(list);
+
+        function buildOption(u) {
+            const li = document.createElement('li');
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'dropdown-item';
+            btn.textContent = u.fio;
+            btn.addEventListener('click', function (e) {
+                e.preventDefault();
+                snapshot('выбор пользователя iSpring');
+                hidden.value = u.id;
+                display.value = u.fio;
+                rows[index].user_id_ispring = u.id;
+
+                display.classList.remove('is-invalid');
+
+                // Обновляем кнопку только если уже была проверка
+                if (btnApply.dataset.checked) {
+                    btnApply.dataset.confirmed = '';
+                    highlightMissingRows();
+                    updateApplyButton();
+                }
+
+                const dd = bootstrap.Dropdown.getInstance(display);
+                if (dd) dd.hide();
+            });
+            li.appendChild(btn);
+            return li;
+        }
+
+        function renderOptions(query) {
+            list.innerHTML = '';
+
+            const q = (query || '').trim().toLowerCase();
+            const matches = q
+                ? dbUsers.filter(u => u.fio.toLowerCase().includes(q)).slice(0, 100)
+                : dbUsers.slice(0, 100);
+
+            if (!matches.length) {
+                const li = document.createElement('li');
+                li.innerHTML = '<span class="dropdown-item-text text-muted">Ничего не найдено</span>';
+                list.appendChild(li);
+                return;
+            }
+
+            matches.forEach(u => list.appendChild(buildOption(u)));
+        }
+
+        renderOptions('');
+
+        display.addEventListener('input', function () {
+            renderOptions(display.value);
+            const dd = bootstrap.Dropdown.getInstance(display);
+            if (dd) dd.show();
+        });
+
+        display.addEventListener('show.bs.dropdown', function () {
+            renderOptions('');
+        });
+
+        new bootstrap.Dropdown(display, {
+            autoClose: 'outside',
+            strategy: 'fixed',
+        });
+
+        return wrap;
+    }
+
+    function currentFio(userId) {
+        if (!userId) return '';
+        const u = dbUsers.find(x => x.id === userId);
+        return u ? u.fio : '';
+    }
+
+    // ==================== Merge кнопка ====================
+    function updateMergeButton() {
+        const checked = document.querySelectorAll('.iva-row-select:checked');
+        btnMerge.disabled = checked.length !== 2;
+        selectedInfo.textContent = checked.length
+            ? `Выделено: ${checked.length}`
+            : '';
+    }
+
+    btnMerge.addEventListener('click', function () {
+        const checked = Array.from(document.querySelectorAll('.iva-row-select:checked'));
+        if (checked.length !== 2) return;
+
+        const indices = checked.map(cb => Number(cb.closest('tr').dataset.index));
+        const [i1, i2] = indices;
+
+        const keepStr = window.prompt(
+            'Какую строку оставить?\n' +
+            `1 — ${rows[i1].fio} (${fmtMinutes(rows[i1].duration_minutes)})\n` +
+            `2 — ${rows[i2].fio} (${fmtMinutes(rows[i2].duration_minutes)})\n` +
+            'Введите 1 или 2:',
+            '1'
+        );
+
+        if (keepStr !== '1' && keepStr !== '2') return;
+
+        snapshot('сложение длительностей');
+
+        const keepIdx = keepStr === '2' ? i2 : i1;
+        const removeIdx = keepIdx === i1 ? i2 : i1;
+
+        rows[keepIdx].duration_minutes += rows[removeIdx].duration_minutes;
+        rows[removeIdx].deleted = true;
+
+        renderTable();
+        updateMergeButton();
+
+        if (btnApply.dataset.checked) {
+            btnApply.dataset.confirmed = '';
+            highlightMissingRows();
+            updateApplyButton();
+        }
+    });
+
+    // ==================== Сбор данных ====================
+    function collectRows() {
+        return rows
+            .filter(r => !r.deleted)
+            .map(r => ({
+                id: r.id,
+                fio: r.fio,
+                email: r.email,
+                entry_time: r.entry_time,
+                exit_time: r.exit_time,
+                duration_minutes: r.duration_minutes,
+                device: r.device,
+                ip_address: r.ip_address,
+                user_id_ispring: r.user_id_ispring || null,
+            }));
+    }
+
+    // ==================== Применить ====================
+    btnApply.addEventListener('click', function () {
+        const hasMissing = highlightMissingRows();
+
+        // Помечаем, что попытка проверки была
+        btnApply.dataset.checked = '1';
+
+        if (hasMissing && !btnApply.dataset.confirmed) {
+            showToast(
+                'Есть строки без выбранного пользователя iSpring.<br>' +
+                'Заполните их или нажмите «Всё равно применить».',
+                'warning',
+                10000
+            );
+            btnApply.dataset.confirmed = '1';
+            updateApplyButton();
+            return;
+        }
+
+        btnApply.disabled = true;
+        btnApply.dataset.confirmed = '';
+
+        fetch(`/track/${encodeURIComponent(trackId)}/iva-apply/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCsrfToken(),
+            },
+            body: JSON.stringify({ rows: collectRows() }),
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (!data.ok) {
+                showToast('Ошибка: ' + (data.error || 'неизвестная'), 'danger');
+                return;
+            }
+            window.location.href = data.redirect;
+        })
+        .catch(err => showToast('Ошибка сети: ' + err.message, 'danger'))
+        .finally(() => { btnApply.disabled = false; });
+    });
+
+    // ==================== Отмена загрузки ====================
+    btnCancel.addEventListener('click', function () {
+        fetch(`/track/${encodeURIComponent(trackId)}/iva-cancel/`, {
+            method: 'POST',
+            headers: { 'X-CSRFToken': getCsrfToken() },
+        }).finally(() => {
+            window.location.href = `/track/${trackId}/`;
+        });
+    });
+
+    // ==================== Кнопки истории ====================
+    btnUndo.addEventListener('click', undo);
+    btnRedo.addEventListener('click', redo);
+
+    // ==================== Горячие клавиши ====================
+    document.addEventListener('keydown', function (e) {
+        const ctrl = e.ctrlKey || e.metaKey;
+        if (!ctrl) return;
+
+        const key = e.key.toLowerCase();
+
+        if (key === 'z' && !e.shiftKey) {
+            const tag = document.activeElement?.tagName;
+            const isEditable = tag === 'INPUT' || tag === 'TEXTAREA';
+            if (isEditable && document.activeElement.value !== '') return;
+
+            e.preventDefault();
+            undo();
+            return;
+        }
+
+        if ((key === 'z' && e.shiftKey) || key === 'y') {
+            e.preventDefault();
+            redo();
+        }
+    });
+});
+</script>
+{% endblock %}

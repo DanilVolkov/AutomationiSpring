@@ -21,3 +21,21 @@ class User(models.Model):
             f'{self.user_id} '
             f'({self.first_name} {self.last_name} {self.patronymic})'
         )
+#
+# class IvaUser(models.Model):
+#     course_id
+#     course_name
+#     lesson_id
+#     lesson_name
+#     first_name
+#     last_name
+#     patronymic
+#     other
+#     email
+#     phone
+#     entry_time
+#     exit_time
+#     duration
+#     device
+#     user_type
+#     ip_address

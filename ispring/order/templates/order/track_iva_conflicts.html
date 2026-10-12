@@ -1,0 +1,197 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block mainmenu %}
+<header class="p-3 text-bg-light">
+    <div class="d-flex justify-content-center">
+        <h1 class="h5 mb-0">Разрешение конфликтов</h1>
+    </div>
+</header>
+{% endblock %}
+
+{% block content %}
+
+<div class="container-fluid mt-4 px-4">
+
+    <div id="conflicts-container">
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status"></div>
+            <div class="text-muted mt-3">Загрузка конфликтов…</div>
+        </div>
+    </div>
+
+    <div class="d-flex justify-content-end gap-3 mb-5 pt-3">
+        <button type="button" id="btn-cancel" class="btn btn-outline-secondary">
+            Отменить загрузку данных
+        </button>
+        <button type="button" id="btn-resolve" class="btn btn-primary">
+            Разрешить конфликты
+        </button>
+    </div>
+
+</div>
+
+<div id="toast-container"
+     class="toast-container position-fixed bottom-0 end-0 p-3"
+     style="z-index: 1080;">
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const trackId = "{{ track_id|escapejs }}";
+    const container = document.getElementById('conflicts-container');
+    const btnResolve = document.getElementById('btn-resolve');
+    const btnCancel  = document.getElementById('btn-cancel');
+    const toastContainer = document.getElementById('toast-container');
+
+    let conflicts = [];
+
+    function getCsrfToken() {
+        const m = document.cookie.match(/csrftoken=([^;]+)/);
+        return m ? m[1] : '';
+    }
+
+    function showToast(msg, type) {
+        const cls = { success: 'text-bg-success', danger: 'text-bg-danger',
+                      info: 'text-bg-primary' }[type] || 'text-bg-secondary';
+        const el = document.createElement('div');
+        el.className = `toast align-items-center ${cls} border-0`;
+        el.innerHTML = `<div class="d-flex">
+            <div class="toast-body">${msg}</div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto"
+                    data-bs-dismiss="toast"></button>
+        </div>`;
+        toastContainer.appendChild(el);
+        const t = new bootstrap.Toast(el, { autohide: false });
+        t.show();
+        el.addEventListener('hidden.bs.toast', () => el.remove());
+    }
+
+    // ---------- Загрузка конфликтов ----------
+    fetch(`/track/${encodeURIComponent(trackId)}/iva-conflicts/data/`, {
+        headers: {'X-Requested-With': 'XMLHttpRequest'},
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (!data.ok) {
+            container.innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
+            return;
+        }
+        conflicts = data.conflicts;
+        renderConflicts();
+    })
+    .catch(err => {
+        container.innerHTML = `<div class="alert alert-danger">${err.message}</div>`;
+    });
+
+    // ---------- Отрисовка ----------
+    function renderConflicts() {
+        container.innerHTML = '';
+
+        conflicts.forEach((c, i) => {
+            const card = document.createElement('div');
+            card.className = 'card mb-3 conflict-card';
+            card.dataset.index = i;
+
+            card.innerHTML = `
+                    <div class="row align-items-stretch g-3">
+
+                        <div class="col-md-5">
+                            ${renderUserBlock(c.left, `left-${i}`, 'Вариант А')}
+                        </div>
+
+                        <div class="col-md-2 d-flex flex-column justify-content-center
+                                    align-items-center">
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio"
+                                       name="choice-${i}" value="left"
+                                       id="choice-left-${i}" checked>
+                                <label class="form-check-label small"
+                                       for="choice-left-${i}">
+                                    Взять А
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio"
+                                       name="choice-${i}" value="right"
+                                       id="choice-right-${i}">
+                                <label class="form-check-label small"
+                                       for="choice-right-${i}">
+                                    Взять Б
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="col-md-5">
+                            ${renderUserBlock(c.right, `right-${i}`, 'Вариант Б')}
+                        </div>
+
+                    </div>`;
+            container.appendChild(card);
+        });
+    }
+
+    function renderUserBlock(u, id, title) {
+        return `
+            <div class="border rounded p-3 h-100 ${id.startsWith('left') ? 'bg-light' : ''}">
+                <div class="text-muted small mb-2">${title}</div>
+                <div class="fw-semibold mb-1">${u.fio || '—'}</div>
+                <div class="small text-muted">Email: ${u.email || '—'}</div>
+                <div class="small text-muted">Вход: ${u.entry_time || '—'}</div>
+                <div class="small text-muted">Выход: ${u.exit_time || '—'}</div>
+                <div class="small text-muted">Длительность: ${u.duration || '—'}</div>
+                <div class="small text-muted">Устройство: ${u.device || '—'}</div>
+                <div class="small text-muted">IP: ${u.ip_address || '—'}</div>
+                ${u.user_id_ispring
+                    ? `<div class="small text-success mt-2">
+                           Найден в iSpring
+                       </div>`
+                    : `<div class="small text-warning mt-2">
+                           Не найден в iSpring
+                       </div>`}
+            </div>`;
+    }
+
+    // ---------- Разрешить ----------
+    btnResolve.addEventListener('click', function () {
+        const choices = {};
+        document.querySelectorAll('.conflict-card').forEach(card => {
+            const idx = card.dataset.index;
+            const checked = card.querySelector('input[type="radio"]:checked');
+            if (checked) choices[idx] = checked.value;
+        });
+
+        btnResolve.disabled = true;
+
+        fetch(`/track/${encodeURIComponent(trackId)}/iva-conflicts/resolve/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCsrfToken(),
+            },
+            body: JSON.stringify({ choices }),
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (!data.ok) {
+                showToast('Ошибка: ' + (data.error || 'неизвестная'), 'danger');
+                return;
+            }
+            window.location.href = data.redirect;
+        })
+        .catch(err => showToast('Ошибка сети: ' + err.message, 'danger'))
+        .finally(() => { btnResolve.disabled = false; });
+    });
+
+    // ---------- Отменить ----------
+    btnCancel.addEventListener('click', function () {
+        fetch(`/track/${encodeURIComponent(trackId)}/iva-conflicts/cancel/`, {
+            method: 'POST',
+            headers: { 'X-CSRFToken': getCsrfToken() },
+        }).finally(() => {
+            window.location.href = `/track/${trackId}/`;
+        });
+    });
+});
+</script>
+{% endblock %}
