@@ -560,7 +560,7 @@ class Table:
         users: dict[str, UserResults] = dict()
         for course in self.track.courses:
             if not course.modules:
-                return {}
+                continue
             for module in course.modules:
                 for user in module.result_users:
                     if user.user_id not in users:
@@ -588,7 +588,6 @@ class Table:
             else:
                 durations[course_id] = {user_id: d['duration']}
 
-        duration_median = None
         for course_id, course_dict in durations.items():
             durations_sorted = sorted(list(course_dict.values()))
             duration_median = statistics.median(durations_sorted)

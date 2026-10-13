@@ -2,10 +2,11 @@ import functools
 import json
 import time
 from collections import defaultdict
+from dataclasses import asdict
 from functools import lru_cache
 
 import requests
-from ispring.settings import ISPRING_DEFAULT_FOLDER_ID
+from ispring.settings import ISPRING_DEFAULT_FOLDER_ID, ISPRING_API_HOST_TOKEN
 from requests import HTTPError
 
 from ispring import settings
@@ -118,7 +119,7 @@ class IspringApi:
                     title=item['title'],
                     type=item['type'],
                     added_date=item['addedDate'],
-                    view_url=item['viewUrl'],
+                    view_url=f'{ISPRING_API_HOST_TOKEN}/content/{item['itemId']}/edit/outline',
                     parent_id=item['parentId'],
                 )
             elif item.get('type') == 'Folder':
@@ -300,14 +301,12 @@ class IspringApi:
         if not courses:
             return None
         id_courses = list(map(lambda x: x.id, courses))
-        results = self._get_lessons_and_materials_results(id_courses)[
-            'results'
-        ]
+        data = self._get_lessons_and_materials_results(id_courses)
 
         # with open("data_courses.json", "w", encoding="utf-8") as f:
-        #     json.dump(results, f, ensure_ascii=False, indent=4)
+        #     json.dump(data, f, ensure_ascii=False, indent=4)
 
-        self._set_user_results(results)
+        self._set_user_results(data)
 
         return self._all_items_info[learning_track_id]
 
@@ -315,14 +314,17 @@ class IspringApi:
         users = {}
         modules = {}
         courses = defaultdict(list)
-        with open('data_in_user_results.json', 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
+        # with open('data_in_user_results.json', 'w', encoding='utf-8') as f:
+        #     json.dump(data, f, ensure_ascii=False, indent=4)
 
         for item in data:
             if item['userId'] in users:
                 user = users[item['userId']]
             else:
-                user = User.objects.get(user_id=item['userId'])
+                try:
+                    user = User.objects.get(user_id=item['userId'])
+                except User.DoesNotExist:
+                    raise User.DoesNotExist('Обновите пользователей на главной странице')
                 users[item['userId']] = user
 
             user_results = UserResults(
@@ -367,19 +369,35 @@ class IspringApi:
         Args:
             courses_id: ID курсов.
         """
+        users_modules_results = []
         url = f'{self._host}/learners/modules/results'
         headers = {
             'Authorization': self._token,
             'Accept': 'application/json',
         }
-        params = {
-            'courseIds[]': courses_id,
-        }
-        response = requests.get(
-            url, headers=headers, params=params, timeout=30
-        )
-        response.raise_for_status()
-        return response.json()
+        count = 1
+        next_token = None
+        while count < 100:
+            count += 1
+            params = {
+                'courseIds[]': courses_id,
+                'pageToken': next_token,
+            }
+            response = requests.get(
+                url, headers=headers, params=params, timeout=30
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            users_modules_results.extend(data['results'])
+
+            next_token = data.get('nextPageToken')
+            if not next_token:
+                break
+
+            time.sleep(0.1)
+
+        return users_modules_results
 
 
 @lru_cache(maxsize=1)

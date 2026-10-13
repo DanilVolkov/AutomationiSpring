@@ -185,10 +185,10 @@ class TrackDetailPartialView(View):
             learning_track = api.get_data_courses(track_id)
             table_html = None
             if learning_track:
-                with open('data_results.json', 'w', encoding='utf-8') as f:
-                    json.dump(
-                        asdict(learning_track), f, ensure_ascii=False, indent=4
-                    )
+                # with open('data_results.json', 'w', encoding='utf-8') as f:
+                #     json.dump(
+                #         asdict(learning_track), f, ensure_ascii=False, indent=4
+                #     )
                 table = Table(learning_track)
                 cache.set('table', table)
                 table_html = table.to_html()
@@ -214,7 +214,11 @@ class TrackDetailPartialView(View):
                 'html': html,
                 'breadcrumbs_html': breadcrumbs_html,
             })
-
+        except User.DoesNotExist as e:
+            return JsonResponse(
+                {'ok': False, 'error': str(e)},
+                status=400,
+            )
         except RuntimeError as e:
             return JsonResponse({'ok': False, 'error': str(e)}, status=502)
 
