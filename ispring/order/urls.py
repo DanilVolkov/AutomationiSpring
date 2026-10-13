@@ -89,4 +89,16 @@ urlpatterns = [
         views.TrackIvaApplyView.as_view(),
         name='track_iva_apply',
     ),
+
+    path(
+        'iva/download-csv/',
+         views.IvaDownloadCsvView.as_view(),
+         name='iva_download_csv'
+    ),
+
+    path(
+        'iva/upload-csv/',
+         views.IvaUploadCsvView.as_view(),
+         name='iva_upload_csv'
+    ),
 ]

@@ -1,4 +1,5 @@
 import re
+import statistics
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -7,6 +8,8 @@ from django.template.loader import render_to_string
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
+
+from order.models import Iva
 
 status_compliance = {
     'not_started': 'Не начато',
@@ -501,6 +504,23 @@ class Table:
     ) -> list[list[Cell]]:
         rows: list[list[Cell]] = []
 
+        data_iva = Iva.objects.filter(learning_track_id=self.track.id).values('course_id', 'user_id', 'duration')
+        durations: dict[str, dict[str, int]] = {}
+        for d in data_iva:
+            course_id = str(d['course_id'])
+            user_id = str(d['user_id'])
+            if course_id in durations:
+                if user_id not in durations[course_id]:
+                    durations[course_id][user_id] = d['duration']
+            else:
+                durations[course_id] = {user_id: d['duration']}
+
+        duration_median = None
+        for course_id, course_dict in durations.items():
+            durations_sorted = sorted(list(course_dict.values()))
+            duration_median = statistics.median(durations_sorted)
+
+
         for idx, (user_id, ur) in enumerate(self.track_users.items(), start=1):
             row: list[Cell] = [
                 Cell(value=str(idx), css='border-dark border-end'),
@@ -512,10 +532,9 @@ class Table:
                     row.append(Cell(value='', css='empty'))
                     continue
 
-                # TODO
-                # data_iva = None
-                # durations = None
-                # duration_median = statistics.median(durations)
+                user_duration = None
+                if durations and course.id in durations and user_id in durations[course.id]:
+                    user_duration = durations[course.id][user_id]
 
                 for header in course_headers[course.id]:
                     module: Module | None = None
@@ -536,7 +555,7 @@ class Table:
                     user_results = self._find_user_results_in_module(
                         module, user_id
                     )
-                    row.append(self._make_cell(header.value, user_results))
+                    row.append(self._make_cell(header.value, user_results, user_duration))
                 row[-1].css += ' border-dark border-end'
                 row[-1].css.strip()
             rows.append(row)
@@ -552,7 +571,7 @@ class Table:
         return None
 
     @staticmethod
-    def _make_cell(header: str, ur: UserResults | None) -> Cell:
+    def _make_cell(header: str, ur: UserResults | None, user_duration: float | None) -> Cell:
         if ur is None:
             return Cell(value='Нет результата', css='empty')
 
@@ -562,16 +581,17 @@ class Table:
             case 'Лекция IVA':
                 return Cell(value='', css='empty')
             case 'Лекция итог':
+                # TODO: проверить
                 result = False
-                # TODO: запрос в БД для данных IVA
-                user_iva = None
-                # TODO: сопоставление пользователя из IVA с текущим пользователем
-                if (
-                    user_iva is None
-                    and ur.progress is not None
-                    and ur.progress >= 75.0
-                ):
-                    result = True
+                if user_duration is not None:
+                    if ur.progress > user_duration:
+                        result = True
+                else:
+                    if (
+                        ur.progress is not None
+                        and ur.progress >= 75.0
+                    ):
+                        result = True
                 if result:
                     return Cell(value=str(int(result)), css='table-success')
                 else:

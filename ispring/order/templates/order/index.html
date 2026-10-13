@@ -10,6 +10,26 @@
         </div>
 
         <div class="text-end d-flex gap-3">
+            <a href="{% url 'iva_download_csv' %}"
+               class="btn btn-outline-primary">
+                Скачать отчеты
+            </a>
+
+            <button type="button"
+                    id="btn-upload-iva-reports"
+                    class="btn btn-outline-primary"
+                    data-upload-url="{% url 'iva_upload_csv' %}">
+                <span id="btn-upload-iva-reports-spinner"
+                      class="spinner-border spinner-border-sm me-2 d-none"
+                      role="status" aria-hidden="true"></span>
+                <span id="btn-upload-iva-reports-label">Загрузить отчеты</span>
+            </button>
+
+            <input type="file"
+                   id="iva-reports-file-input"
+                   accept=".csv,text/csv"
+                   class="d-none">
+
             <button type="button"
                     id="btn-sync-courses"
                     class="btn btn-outline-primary">
@@ -45,18 +65,13 @@
         </div>
     </div>
 
-    {# ---------- Список пользователей ---------- #}
+    {# ---------- Toast-контейнер ---------- #}
     <div id="toast-container"
          class="toast-container position-fixed bottom-0 end-0 p-3"
          style="z-index: 1080;"></div>
-    <div id="user-list" class="mt-4">
-        <div class="text-center py-5">
-            <div class="spinner-border text-primary" role="status">
-                <span class="visually-hidden">Загрузка…</span>
-            </div>
-            <div class="text-muted mt-3">Загрузка пользователей...</div>
-        </div>
-    </div>
+
+    {# ---------- Список пользователей (скрытый) ---------- #}
+    <div id="user-list" class="mt-4"></div>
 
 </div>
 
@@ -73,14 +88,22 @@
     const btnUsers          = document.getElementById('btn-sync-users');
     const spinnerUsers      = document.getElementById('btn-sync-users-spinner');
     const labelUsers        = document.getElementById('btn-sync-users-label');
-    const userListEl   = document.getElementById('user-list');
+    const userListEl        = document.getElementById('user-list');
+
+    // ---------- Загрузка отчётов IVA ----------
+    const btnUploadIva      = document.getElementById('btn-upload-iva-reports');
+    const spinnerUploadIva  = document.getElementById('btn-upload-iva-reports-spinner');
+    const labelUploadIva    = document.getElementById('btn-upload-iva-reports-label');
+    const ivaFileInput      = document.getElementById('iva-reports-file-input');
 
     const toastContainer = document.getElementById('toast-container');
-    function showToast(message, type) {
+
+    function showToast(message, type, duration = null) {
         const bgClass = {
             success: 'text-bg-success',
             danger:  'text-bg-danger',
             info:    'text-bg-primary',
+            warning: 'text-bg-warning',
         }[type] || 'text-bg-secondary';
 
         const toastEl = document.createElement('div');
@@ -96,9 +119,19 @@
             </div>
         `;
         toastContainer.appendChild(toastEl);
-        const toast = new bootstrap.Toast(toastEl, { delay: 10000 });
+
+        const toast = new bootstrap.Toast(toastEl, { autohide: false });
         toast.show();
-        toastEl.addEventListener('hidden.bs.toast', () => toastEl.remove());
+
+        let timer = null;
+        if (typeof duration === 'number' && duration > 0) {
+            timer = setTimeout(() => toast.hide(), duration);
+        }
+
+        toastEl.addEventListener('hidden.bs.toast', () => {
+            if (timer) clearTimeout(timer);
+            toastEl.remove();
+        });
     }
 
     function getCsrfToken() {
@@ -122,7 +155,7 @@
                 return;
             }
             if (data.synced) {
-                showToast(`Данные из iSpring загружены`, 'success');
+                showToast('Данные из iSpring загружены', 'success');
             }
             listEl.innerHTML = data.html;
             if (data.breadcrumbs_html !== undefined) {
@@ -140,7 +173,8 @@
         .then(data => {
             userListEl.innerHTML = '';
             if (!data.ok) {
-                showToast('Ошибка загрузки пользователей: ' + (data.error || 'неизвестная'), 'danger');
+                showToast('Ошибка загрузки пользователей: ' +
+                          (data.error || 'неизвестная'), 'danger');
                 return;
             }
             if (data.synced) {
@@ -169,10 +203,13 @@
         })
         .then(r => r.json())
         .then(data => {
-            if (!data.ok) { alert('Произошла ошибка: ' + (data.error || 'неизвестная')); return; }
+            if (!data.ok) {
+                showToast('Ошибка: ' + (data.error || 'неизвестная'), 'danger');
+                return;
+            }
             return loadFolderItems();
         })
-        .catch(err => alert('Произошла ошибка: ' + err.message))
+        .catch(err => showToast('Ошибка: ' + err.message, 'danger'))
         .finally(() => {
             btnCourses.disabled = false;
             spinnerCourses.classList.add('d-none');
@@ -195,16 +232,71 @@
         })
         .then(r => r.json())
         .then(data => {
-            if (!data.ok) { alert('Ошибка: ' + (data.error || 'неизвестная')); return; }
+            if (!data.ok) {
+                showToast('Ошибка: ' + (data.error || 'неизвестная'), 'danger');
+                return;
+            }
             showToast(`Пользователи загружены: ${data.count}`, 'success');
         })
-        .catch(err => alert('Произошла ошибка: ' + err.message))
+        .catch(err => showToast('Ошибка: ' + err.message, 'danger'))
         .finally(() => {
             btnUsers.disabled = false;
             spinnerUsers.classList.add('d-none');
             labelUsers.textContent = 'Обновить пользователей';
         });
     });
+
+    // ---------- Кнопка "Загрузить отчеты" ----------
+    if (btnUploadIva) {
+        btnUploadIva.addEventListener('click', function () {
+            ivaFileInput.value = '';
+            ivaFileInput.click();
+        });
+
+        ivaFileInput.addEventListener('change', function () {
+            const file = ivaFileInput.files[0];
+            if (!file) return;
+            uploadIvaReports(file);
+        });
+    }
+
+    function uploadIvaReports(file) {
+        btnUploadIva.disabled = true;
+        spinnerUploadIva.classList.remove('d-none');
+        labelUploadIva.textContent = 'Загрузка…';
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        fetch(btnUploadIva.dataset.uploadUrl, {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': getCsrfToken(),
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            body: formData,
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (!data.ok) {
+                showToast('Ошибка загрузки: ' + (data.error || 'неизвестная'), 'danger');
+                return;
+            }
+
+            const msg = `Отчёты загружены:<br>- Добавлено ${data.created}<br>- Обновлено ${data.updated}`;
+            showToast(msg, 'success', 10000);
+
+            if (data.errors && data.errors.length) {
+                console.warn('Ошибки при разборе CSV:', data.errors);
+            }
+        })
+        .catch(err => showToast('Ошибка сети: ' + err.message, 'danger'))
+        .finally(() => {
+            btnUploadIva.disabled = false;
+            spinnerUploadIva.classList.add('d-none');
+            labelUploadIva.textContent = 'Загрузить отчеты';
+        });
+    }
 })();
 </script>
 {% endblock %}

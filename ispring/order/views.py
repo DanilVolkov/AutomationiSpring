@@ -7,14 +7,15 @@ from datetime import datetime, timedelta
 from io import BytesIO
 
 from django.core.cache import cache
-from django.db import connection
-from django.http import FileResponse, JsonResponse
+from django.db import connection, transaction
+from django.db.models import Q
+from django.http import FileResponse, JsonResponse, HttpResponse
 from django.template.loader import render_to_string
 from django.views import View
 from django.views.generic import TemplateView
 from ispring.settings import ISPRING_DEFAULT_FOLDER_ID
 
-from order.models import User
+from order.models import User, Iva
 from order.services import get_ispring_api
 from order.utils import IvaHandler, IvaUser, Table
 
@@ -606,10 +607,28 @@ class TrackIvaApplyView(View):
             except KeyError, ValueError, TypeError:
                 continue
 
+        track = cache.get('table').track
         cache.set('iva_rows', new_rows)
         course_id = cache.get('course_id')
+        course_name = None
+        match = list(filter(lambda c: course_id == c.id, track.courses))
+        if match:
+            course_name = match[0].title
 
-        # TODO: запрос на добавление в БД
+        Iva.objects.filter(learning_track_id=track.id, course_id=course_id).delete()
+        db_obj = [
+            Iva(
+                learning_track_id=track.id,
+                learning_track_name=track.title,
+                course_id=course_id,
+                course_name=course_name if course_name is not None else '',
+                user_id=iva_user.user_id_ispring,
+                fio=iva_user.fio,
+                duration=int(iva_user.duration.total_seconds())
+            )
+            for iva_user in new_rows
+        ]
+        Iva.objects.bulk_create(db_obj, batch_size=100)
 
         return JsonResponse({
             'ok': True,
@@ -630,3 +649,128 @@ class TrackIvaCancelView(View):
         cache.delete('iva_rows')
         cache.delete('iva_conflicts')
         return JsonResponse({'ok': True})
+
+class IvaDownloadCsvView(View):
+
+    def get(self, request, *args, **kwargs):
+        response = HttpResponse(
+            content_type='text/csv; charset=utf-8',
+        )
+        response['Content-Disposition'] = (
+            'attachment; filename="iva_reports.csv"'
+        )
+
+        # BOM для Excel, чтобы русский корректно открывался
+        response.write('\ufeff')
+
+        writer = csv.writer(response, delimiter=';')
+
+        # Заголовки — те же, что ждёт парсер при загрузке
+        writer.writerow([
+            'ID траектории',
+            'Название траектории',
+            'ID курса',
+            'Название курса',
+            'ID пользователя',
+            'ФИО пользователя',
+            'Длительность',
+            'Время добавления'
+        ])
+
+        for r in Iva.objects.all():
+            writer.writerow([
+                r.learning_track_id,
+                r.learning_track_name,
+                r.course_id,
+                r.course_name,
+                r.user_id,
+                r.fio,
+                r.duration,
+                r.created_at
+            ])
+
+        return response
+
+
+class IvaUploadCsvView(View):
+
+    def post(self, request, *args, **kwargs):
+        csv_file = request.FILES.get('file')
+        if not csv_file:
+            return JsonResponse(
+                {'ok': False, 'error': 'Файл не передан'}, status=400)
+
+        try:
+            raw = csv_file.read()
+            text = None
+            for encoding in ('utf-8-sig', 'utf-8', 'cp1251'):
+                try:
+                    text = raw.decode(encoding)
+                    break
+                except UnicodeDecodeError:
+                    pass
+            if text is None:
+                return JsonResponse(
+                    {'ok': False, 'error': 'Не удалось определить кодировку'},
+                    status=400)
+
+            reader = csv.DictReader(io.StringIO(text), delimiter=';')
+            csv_rows = list(reader)
+        except Exception as e:
+            return JsonResponse(
+                {'ok': False, 'error': f'Ошибка чтения CSV: {e}'},
+                status=400)
+
+        created_count = 0
+        updated_count = 0
+        errors = []
+
+        with transaction.atomic():
+            for i, r in enumerate(csv_rows, start=2):
+                try:
+                    learning_track_id =r.get('ID траектории')
+                    learning_track_name = r.get('Название траектории')
+                    course_id = r.get('ID курса')
+                    course_name = r.get('Название курса')
+                    user_id = r.get('ID пользователя')
+                    fio = r.get('ФИО пользователя')
+                    duration = r.get('Длительность')
+                    created_at = datetime.fromisoformat(r.get('Время добавления'))
+                    obj, created = Iva.objects.get_or_create(
+                        learning_track_id=learning_track_id,
+                        course_id=course_id,
+                        user_id=user_id,
+                        defaults={
+                            "learning_track_name": learning_track_name,
+                            "course_name": course_name,
+                            "fio": fio,
+                            "duration": duration,
+                            "created_at": created_at,
+                        },
+                    )
+
+                    if created:
+                        created_count += 1
+
+                    if not created and created_at > obj.created_at:
+                        obj.learning_track_name = learning_track_name
+                        obj.course_name = course_name
+                        obj.fio = fio
+                        obj.duration = duration
+                        obj.created_at = created_at
+                        obj.save(update_fields=[
+                            "learning_track_name", "course_name",
+                            "fio", "duration", "created_at",
+                        ])
+                        updated_count += 1
+                except Exception as e:
+                    errors.append(f'Строка {i}: {e}')
+
+        return JsonResponse({
+            'ok': True,
+            'created': created_count,
+            'updated': updated_count,
+            'errors': errors[:50],
+            'total': len(csv_rows),
+        })
+

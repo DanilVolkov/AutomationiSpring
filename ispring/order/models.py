@@ -1,4 +1,5 @@
 from django.db import models
+from django.utils import timezone
 
 
 class User(models.Model):
@@ -32,7 +33,11 @@ class Iva(models.Model):
     course_name = models.CharField(verbose_name='Название курса', blank=True)
     user_id = models.UUIDField(verbose_name='ID пользователя')
     fio = models.CharField(verbose_name='ФИО пользователя', blank=True)
-    duration = models.IntegerField(verbose_name='Длительность в минутах')
+    duration = models.IntegerField(verbose_name='Длительность')
+    created_at = models.DateTimeField(
+        default=timezone.now,
+        verbose_name='Время добавления',
+    )
 
     def __str__(self):
         return (
@@ -40,3 +45,8 @@ class Iva(models.Model):
             f'{self.course_id} ({self.course_name}) -> '
             f'{self.user_id} ({self.fio}) - {self.duration}'
         )
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["learning_track_id", "course_id"]),
+        ]
