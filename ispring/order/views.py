@@ -219,6 +219,43 @@ class TrackDetailPartialView(View):
             return JsonResponse({'ok': False, 'error': str(e)}, status=502)
 
 
+class TrackShortPageView(TemplateView):
+    """Страница сокращённой таблицы."""
+
+    template_name = 'order/track_short.html'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['track_id'] = self.kwargs['track_id']
+        context['table_mode'] = 'short'
+        return context
+
+
+class TrackShortPartialView(View):
+    """Отдаёт HTML сокращённой таблицы + крошки."""
+
+    def get(self, request, track_id, *args, **kwargs):
+        try:
+            table = cache.get('table')
+            table_html = table.to_short_html()
+
+            api = get_ispring_api()
+            breadcrumbs = api.get_parents_item(track_id) if track_id else []
+            breadcrumbs_html = render_to_string(
+                'order/partials/_breadcrumbs.html',
+                {'breadcrumbs': breadcrumbs},
+                request=request,
+            )
+
+            return JsonResponse({
+                'ok': True,
+                'html': table_html,
+                'breadcrumbs_html': breadcrumbs_html,
+            })
+
+        except RuntimeError as e:
+            return JsonResponse({'ok': False, 'error': str(e)}, status=502)
+
 class TrackExportExcelView(View):
     def get(self, request, track_id, *args, **kwargs):
         try:

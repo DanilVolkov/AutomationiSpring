@@ -1,0 +1,14 @@
+{# order/templates/order/partials/_table_switcher.html #}
+
+<div class="d-flex justify-content-center mb-3">
+    <div class="btn-group" role="group" aria-label="Переключение таблицы">
+        <a href="{% url 'track_detail' track_id %}"
+           class="btn btn-sm {% if active == 'full' %}btn-primary{% else %}btn-outline-primary{% endif %}">
+            Полная таблица
+        </a>
+        <a href="{% url 'track_short' track_id %}"
+           class="btn btn-sm {% if active == 'short' %}btn-primary{% else %}btn-outline-primary{% endif %}">
+            Сокращённая таблица
+        </a>
+    </div>
+</div>

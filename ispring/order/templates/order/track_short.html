@@ -1,0 +1,186 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block mainmenu %}
+<header class="p-3 text-bg-light">
+    <div class="d-flex flex-wrap align-items-center justify-content-center justify-content-lg-start gap-3">
+
+        <div id="breadcrumbs-container" class="me-lg-auto">
+            {% include 'order/partials/_breadcrumbs.html' with breadcrumbs=breadcrumbs %}
+        </div>
+
+        <div class="text-end d-flex gap-3">
+            <button type="button"
+                    id="btn-upload-iva"
+                    class="btn btn-outline-primary"
+                    data-upload-url="{% url 'track_upload_iva' track_id %}">
+                <span id="btn-upload-iva-spinner"
+                      class="spinner-border spinner-border-sm me-2 d-none"
+                      role="status" aria-hidden="true"></span>
+                <span id="btn-upload-iva-label">Загрузить отчет из IVA</span>
+            </button>
+
+            <input type="file"
+                   id="iva-file-input"
+                   accept=".csv,text/csv"
+                   class="d-none">
+
+            <a href="{% url 'track_export_xlsx' track_id %}"
+               id="btn-export-excel"
+               class="btn btn-outline-primary">
+                <span id="btn-export-excel-spinner"
+                      class="spinner-border spinner-border-sm me-2 d-none"
+                      role="status" aria-hidden="true"></span>
+                <span id="btn-export-excel-label">Скачать таблицу</span>
+            </a>
+        </div>
+    </div>
+</header>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4 px-4">
+
+    {# ---------- Переключатель таблиц ---------- #}
+    {% include 'order/partials/_table_switcher.html' with track_id=track_id active='short' %}
+
+    <div id="track-detail">
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Загрузка...</span>
+            </div>
+            <div class="text-muted mt-3">Загрузка данных траектории...</div>
+        </div>
+    </div>
+
+</div>
+
+<div id="toast-container"
+     class="toast-container position-fixed bottom-0 end-0 p-3"
+     style="z-index: 1080;"></div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const container = document.getElementById('track-detail');
+    const crumbsEl  = document.getElementById('breadcrumbs-container');
+    const trackId   = "{{ track_id|escapejs }}";
+
+    fetch(`/partial/track/${encodeURIComponent(trackId)}/short/`, {
+        headers: {'X-Requested-With': 'XMLHttpRequest'}
+    })
+        .then(r => r.json())
+        .then(data => {
+            if (!data.ok) {
+                container.innerHTML =
+                    `<div class="alert alert-danger mt-3">${data.error}</div>`;
+                return;
+            }
+            container.innerHTML = data.html;
+            if (data.breadcrumbs_html !== undefined) {
+                crumbsEl.innerHTML = data.breadcrumbs_html;
+            }
+        })
+        .catch(err => {
+            container.innerHTML =
+                `<div class="alert alert-danger mt-3">${err.message}</div>`;
+        });
+
+    // ---------- Загрузка CSV из IVA — как на полной странице ----------
+    const btnUpload  = document.getElementById('btn-upload-iva');
+    const btnSpinner = document.getElementById('btn-upload-iva-spinner');
+    const btnLabel   = document.getElementById('btn-upload-iva-label');
+    const fileInput  = document.getElementById('iva-file-input');
+
+    const toastContainer = document.getElementById('toast-container');
+
+    function getCsrfToken() {
+        const m = document.cookie.match(/csrftoken=([^;]+)/);
+        return m ? m[1] : '';
+    }
+
+    function showToast(message, type) {
+        const bgClass = {
+            success: 'text-bg-success',
+            danger:  'text-bg-danger',
+            info:    'text-bg-primary',
+            warning: 'text-bg-warning',
+        }[type] || 'text-bg-secondary';
+
+        const el = document.createElement('div');
+        el.className = `toast align-items-center ${bgClass} border-0`;
+        el.setAttribute('role', 'alert');
+        el.setAttribute('aria-live', 'assertive');
+        el.setAttribute('aria-atomic', 'true');
+        el.innerHTML = `
+            <div class="d-flex">
+                <div class="toast-body">${message}</div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto"
+                        data-bs-dismiss="toast" aria-label="Закрыть"></button>
+            </div>`;
+        toastContainer.appendChild(el);
+        const t = new bootstrap.Toast(el, { autohide: false });
+        t.show();
+        el.addEventListener('hidden.bs.toast', () => el.remove());
+    }
+
+    // ---------- Открыть выбор файла ----------
+    btnUpload.addEventListener('click', function () {
+        fileInput.value = '';
+        fileInput.click();
+    });
+
+    // ---------- Обработчик выбора файла ----------
+    fileInput.addEventListener('change', function () {
+        const file = fileInput.files[0];
+        if (!file) return;
+        uploadFile(file);
+    });
+
+    function uploadFile(file) {
+        btnUpload.disabled = true;
+        btnSpinner.classList.remove('d-none');
+        btnLabel.textContent = 'Обработка…';
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        fetch(btnUpload.dataset.uploadUrl, {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': getCsrfToken(),
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            body: formData,
+        })
+        .then(r => r.json())
+        .then(data => {
+            // ---------- Ошибка без redirect ----------
+            if (!data.ok && !data.redirect) {
+                showToast('Ошибка: ' + (data.error || 'неизвестная'), 'danger');
+                return;
+            }
+
+            // ---------- Переход на страницу (конфликты или финальная таблица) ----------
+            if (data.redirect) {
+                window.location.href = data.redirect;
+                return;
+            }
+
+            // ---------- Фолбэк: если сервер вернул html напрямую ----------
+            if (data.ok && data.html !== undefined) {
+                container.innerHTML = data.html;
+                showToast(`Загружено строк: ${data.rows_count}`, 'success');
+            }
+        })
+        .catch(err => {
+            showToast('Ошибка сети: ' + err.message, 'danger');
+        })
+        .finally(() => {
+            btnUpload.disabled = false;
+            btnSpinner.classList.add('d-none');
+            btnLabel.textContent = 'Загрузить отчет из IVA';
+        });
+    }
+});
+</script>
+{% endblock %}

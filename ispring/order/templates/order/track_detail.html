@@ -40,7 +40,7 @@
 
 {% block content %}
 <div class="container-fluid mt-4 px-4">
-
+    {% include 'order/partials/_table_switcher.html' with track_id=track_id active='full' %}
     <div id="track-detail">
         <div id="track-loading" class="text-center py-5">
             <div class="spinner-border text-primary" role="status">

@@ -42,15 +42,15 @@ class IvaUser:
 
     @classmethod
     def make(
-        cls,
-        id: str,
-        fio: str,
-        email: str,
-        entry_time: str,
-        exit_time: str,
-        duration: str,
-        device: str,
-        ip_address: str,
+            cls,
+            id: str,
+            fio: str,
+            email: str,
+            entry_time: str,
+            exit_time: str,
+            duration: str,
+            device: str,
+            ip_address: str,
     ):
         _entry_time = cls._str_to_datetime(entry_time)
         _exit_time = cls._str_to_datetime(exit_time)
@@ -189,16 +189,38 @@ class Table:
     }
 
     def __init__(
-        self,
-        learning_track: LearningTrack,
+            self,
+            learning_track: LearningTrack,
     ):
         self.track = learning_track
         self.track_users = self._collect_users()
 
     def to_excel(self):
         header_top, header_bottom, rows = self._build_table()
+        wb = Workbook()
+        ws = wb.active
+        ws.title = 'Подробно'
+        self._write_excel(
+            ws,
+            header_top,
+            header_bottom,
+            rows
+        )
+        ws = wb.create_sheet('Посещения', 0)
 
-        return self._write_excel(header_top, header_bottom, rows)
+        header_top, new_header_bottom, new_rows = self._short_table(
+            header_top,
+            header_bottom,
+            rows
+        )
+        self._write_excel(
+            ws,
+            header_top,
+            new_header_bottom,
+            new_rows
+        )
+
+        return wb
 
     def _parse_css(self, css: str):
         fill = border = None
@@ -211,18 +233,30 @@ class Table:
                 )
 
         if 'border-dark' in css:
+            medium = Side(style='medium', color='000000')
             if 'border-bottom' in css:
                 border = Border(
-                    right=Side(style='medium', color='000000'),
-                    bottom=Side(style='medium', color='000000'),
+                    right=medium,
+                    bottom=medium,
                 )
             else:
-                border = Border(right=Side(style='medium', color='000000'))
+                border = Border(
+                    right=medium,
+                    bottom=Side(style="thin", color='000000')
+                )
+        else:
+            thin = Side(style="thin", color='000000')
+            border = Border(
+                left=thin,
+                right=thin,
+                top=thin,
+                bottom=thin,
+            )
 
         return fill, border
 
     def _apply_cell_style(
-        self, excel_cell, cell: Cell, is_header: bool = False
+            self, excel_cell, cell: Cell, is_header: bool = False
     ):
         fill, border = self._parse_css(cell.css)
 
@@ -271,11 +305,7 @@ class Table:
 
             ws.column_dimensions[letter].width = width
 
-    def _write_excel(self, header_top, header_bottom, rows) -> Workbook:
-        wb = Workbook()
-        ws = wb.active
-        ws.title = 'Подробно'
-
+    def _write_excel(self, ws, header_top, header_bottom, rows):
         # Курсы
         col = 1
         for cell in header_top:
@@ -328,7 +358,7 @@ class Table:
                     continue
 
                 v = cell.value
-                regex = re.compile(r'\d+\.?\d*')
+                regex = re.compile(r'^\d+\.?\d*$')
                 if regex.match(v):
                     if v.isdigit():
                         v = int(v)
@@ -349,7 +379,6 @@ class Table:
 
         self._autosize_columns(ws)
         ws.freeze_panes = 'C3'
-        return wb
 
     def to_html(self) -> str:
         header_top, header_bottom, rows = self._build_table()
@@ -360,6 +389,48 @@ class Table:
                 'header_top': header_top,
                 'header_bottom': header_bottom,
                 'rows': rows,
+            },
+        )
+
+    @staticmethod
+    def _short_table(header_top, header_bottom, rows):
+        new_header_bottom: list[Cell] = []
+        new_rows: list[list[Cell]] = []
+
+        counter_colspan = 0
+        colspans = [c.colspan for c in header_top[2:]]
+        for hb_cell in header_bottom:
+            if hb_cell.value in ['Лекция итог', 'ДЗ итог']:
+                new_header_bottom.append(hb_cell)
+            else:
+                colspans[counter_colspan] -= 1
+            if hb_cell.note == 'end':
+                counter_colspan += 1
+
+        for i, colspan in enumerate(colspans, start=2):
+            header_top[i].colspan = colspan
+
+        for row in rows:
+            new_row: list[Cell] = []
+            for cell in row:
+                if cell.note in ['№', 'ФИО', 'Лекция итог', 'ДЗ итог']:
+                    new_row.append(cell)
+            new_rows.append(new_row)
+        return header_top, new_header_bottom, new_rows
+
+    def to_short_html(self) -> str:
+        header_top, header_bottom, rows = self._build_table()
+
+        header_top, new_header_bottom, new_rows = self._short_table(header_top,
+                                                                    header_bottom,
+                                                                    rows)
+
+        return render_to_string(
+            'order/partials/_track_table.html',
+            {
+                'header_top': header_top,
+                'header_bottom': new_header_bottom,
+                'rows': new_rows,
             },
         )
 
@@ -405,8 +476,8 @@ class Table:
                     lambda x: (
                         True
                         if (
-                            x.passing_score is not None
-                            and x.awarded_score is not None
+                                x.passing_score is not None
+                                and x.awarded_score is not None
                         )
                         else False
                     ),
@@ -481,6 +552,7 @@ class Table:
             if len(others) > 0:
                 header.extend(others)
                 course_headers[course.id].extend(others)
+            course_headers[course.id][-1].note = 'end'
 
         return header, course_headers
 
@@ -500,11 +572,12 @@ class Table:
         )
 
     def _build_rows(
-        self, course_headers: dict[str, list[Cell]]
+            self, course_headers: dict[str, list[Cell]]
     ) -> list[list[Cell]]:
         rows: list[list[Cell]] = []
 
-        data_iva = Iva.objects.filter(learning_track_id=self.track.id).values('course_id', 'user_id', 'duration')
+        data_iva = Iva.objects.filter(learning_track_id=self.track.id).values(
+            'course_id', 'user_id', 'duration')
         durations: dict[str, dict[str, int]] = {}
         for d in data_iva:
             course_id = str(d['course_id'])
@@ -519,12 +592,13 @@ class Table:
         for course_id, course_dict in durations.items():
             durations_sorted = sorted(list(course_dict.values()))
             duration_median = statistics.median(durations_sorted)
-
+            course_dict['duration_median'] = int(duration_median)
 
         for idx, (user_id, ur) in enumerate(self.track_users.items(), start=1):
             row: list[Cell] = [
-                Cell(value=str(idx), css='border-dark border-end'),
-                Cell(value=(ur.fio or ''), css='border-dark border-end'),
+                Cell(value=str(idx), css='border-dark border-end', note='№'),
+                Cell(value=(ur.fio or ''), css='border-dark border-end',
+                     note='ФИО'),
             ]
 
             for course in self.track.courses:
@@ -533,8 +607,11 @@ class Table:
                     continue
 
                 user_duration = None
-                if durations and course.id in durations and user_id in durations[course.id]:
+                duration_median = None
+                if durations and course.id in durations and user_id in \
+                        durations[course.id]:
                     user_duration = durations[course.id][user_id]
+                    duration_median = durations[course.id]['duration_median']
 
                 for header in course_headers[course.id]:
                     module: Module | None = None
@@ -555,7 +632,8 @@ class Table:
                     user_results = self._find_user_results_in_module(
                         module, user_id
                     )
-                    row.append(self._make_cell(header.value, user_results, user_duration))
+                    row.append(self._make_cell(header.value, user_results,
+                                               user_duration, duration_median))
                 row[-1].css += ' border-dark border-end'
                 row[-1].css.strip()
             rows.append(row)
@@ -563,7 +641,7 @@ class Table:
 
     @staticmethod
     def _find_user_results_in_module(
-        module: Module, user_id: str
+            module: Module, user_id: str
     ) -> UserResults | None:
         for r in module.result_users:
             if r.user_id == user_id:
@@ -571,42 +649,70 @@ class Table:
         return None
 
     @staticmethod
-    def _make_cell(header: str, ur: UserResults | None, user_duration: float | None) -> Cell:
+    def parse_duration(duration: int) -> tuple[int, int]:
+        h, rem = divmod(duration, 3600)
+        m = rem // 60
+        return h, m
+
+    @staticmethod
+    def _make_cell(header: str, ur: UserResults | None,
+                   user_duration: int | None,
+                   duration_median: float | None) -> Cell:
         if ur is None:
             return Cell(value='Нет результата', css='empty')
 
         match header:
             case 'Лекция iSpring':
                 return Cell(value=Table._format_value(ur.progress))
+
             case 'Лекция IVA':
-                return Cell(value='', css='empty')
-            case 'Лекция итог':
-                # TODO: проверить
-                result = False
+                result = ''
                 if user_duration is not None:
-                    if ur.progress > user_duration:
-                        result = True
-                else:
+                    h, m = Table.parse_duration(user_duration)
+                    result = f'{h}:{m:02d}'
+                if user_duration is not None and duration_median is not None:
+                    duration_result = int(duration_median * 0.7)
+                    h, m = Table.parse_duration(duration_result)
+                    result += f' / {h}:{m:02d}'
+                    diff = user_duration - duration_result + 1
+                    h, m = Table.parse_duration(abs(int(diff)))
+                    result += ' (+' if int(diff) >= 0 else ' (-'
+                    result += f'{h}:{m:02d})'
+                return Cell(value=result)
+
+            case 'Лекция итог':
+                result = False
+                if user_duration is not None and duration_median is not None:
                     if (
-                        ur.progress is not None
-                        and ur.progress >= 75.0
+                            (
+                                    ur.progress is not None and ur.progress >= 74.0) or
+                            # 70% времени был на лекции в IVA
+                            (user_duration >= (duration_median * 0.7))
                     ):
                         result = True
+                elif ur.progress is not None and ur.progress is not None and ur.progress >= 74.0:
+                    result = True
+
                 if result:
-                    return Cell(value=str(int(result)), css='table-success')
+                    return Cell(value=str(int(result)), css='table-success',
+                                note='Лекция итог')
                 else:
-                    return Cell(value=str(int(result)), css='table-danger')
+                    return Cell(value=str(int(result)), css='table-danger',
+                                note='Лекция итог')
+
             case 'ДЗ порог':
                 return Cell(value=Table._format_value(ur.passing_score))
+
             case 'ДЗ прогресс':
                 result = ur.progress
                 if (ur.progress is None and ur.awarded_score is not None) or (
-                    ur.progress is not None
-                    and ur.awarded_score is not None
-                    and ur.progress != ur.awarded_score
+                        ur.progress is not None
+                        and ur.awarded_score is not None
+                        and ur.progress != ur.awarded_score
                 ):
                     result = ur.awarded_score
                 return Cell(value=Table._format_value(result))
+
             case 'ДЗ итог':
                 result = ''
                 css = ''
@@ -634,7 +740,7 @@ class Table:
                             result = 'Отклонено'
                             css = 'table-danger'
 
-                return Cell(value=result, css=css)
+                return Cell(value=result, css=css, note='ДЗ итог')
 
         return Cell(value=Table._format_value(ur.progress))
 
@@ -667,8 +773,8 @@ class IvaHandler:
             if r.ip_address in unique_ip:
                 unique_ip[r.ip_address].duration += r.duration
                 if (
-                    len(unique_ip[r.ip_address].fio) < len(r.fio)
-                    and not unique_ip[r.ip_address].email
+                        len(unique_ip[r.ip_address].fio) < len(r.fio)
+                        and not unique_ip[r.ip_address].email
                 ):
                     unique_ip[r.ip_address].fio = r.fio
             else:
