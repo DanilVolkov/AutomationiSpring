@@ -5,21 +5,42 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     initial = True
 
-    dependencies = [
-    ]
+    dependencies = []
 
     operations = [
         migrations.CreateModel(
             name='User',
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                (
+                    'id',
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name='ID',
+                    ),
+                ),
                 ('user_id', models.UUIDField(verbose_name='ID пользователя')),
-                ('first_name', models.CharField(blank=True, max_length=255, verbose_name='Имя')),
-                ('last_name', models.CharField(blank=True, max_length=255, verbose_name='Фамилия')),
-                ('patronymic', models.CharField(blank=True, max_length=255, verbose_name='Отчество')),
+                (
+                    'first_name',
+                    models.CharField(
+                        blank=True, max_length=255, verbose_name='Имя'
+                    ),
+                ),
+                (
+                    'last_name',
+                    models.CharField(
+                        blank=True, max_length=255, verbose_name='Фамилия'
+                    ),
+                ),
+                (
+                    'patronymic',
+                    models.CharField(
+                        blank=True, max_length=255, verbose_name='Отчество'
+                    ),
+                ),
             ],
             options={
                 'ordering': ['last_name', 'first_name', 'patronymic'],
@@ -28,18 +49,55 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name='Iva',
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('learning_track_id', models.UUIDField(verbose_name='ID траектории')),
-                ('learning_track_name', models.CharField(blank=True, verbose_name='Название траектории')),
+                (
+                    'id',
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name='ID',
+                    ),
+                ),
+                (
+                    'learning_track_id',
+                    models.UUIDField(verbose_name='ID траектории'),
+                ),
+                (
+                    'learning_track_name',
+                    models.CharField(
+                        blank=True, verbose_name='Название траектории'
+                    ),
+                ),
                 ('course_id', models.UUIDField(verbose_name='ID курса')),
-                ('course_name', models.CharField(blank=True, verbose_name='Название курса')),
+                (
+                    'course_name',
+                    models.CharField(
+                        blank=True, verbose_name='Название курса'
+                    ),
+                ),
                 ('user_id', models.UUIDField(verbose_name='ID пользователя')),
-                ('fio', models.CharField(blank=True, verbose_name='ФИО пользователя')),
+                (
+                    'fio',
+                    models.CharField(
+                        blank=True, verbose_name='ФИО пользователя'
+                    ),
+                ),
                 ('duration', models.IntegerField(verbose_name='Длительность')),
-                ('created_at', models.DateTimeField(default=django.utils.timezone.now, verbose_name='Время добавления')),
+                (
+                    'created_at',
+                    models.DateTimeField(
+                        default=django.utils.timezone.now,
+                        verbose_name='Время добавления',
+                    ),
+                ),
             ],
             options={
-                'indexes': [models.Index(fields=['learning_track_id', 'course_id'], name='order_iva_learnin_857007_idx')],
+                'indexes': [
+                    models.Index(
+                        fields=['learning_track_id', 'course_id'],
+                        name='order_iva_learnin_857007_idx',
+                    )
+                ],
             },
         ),
     ]

@@ -7,6 +7,7 @@
     <title>{{ title }}</title>
 </head>
 <body>
+    <script src="{% static 'order/js/bootstrap.bundle.min.js' %}"></script>
     {% csrf_token %}
     {% block mainmenu %}
     {% endblock %}
@@ -14,6 +15,6 @@
     {% block content %}
     {% endblock %}
 
-    <script src="{% static 'order/js/bootstrap.bundle.min.js' %}"></script>
+
 </body>
 </html>
