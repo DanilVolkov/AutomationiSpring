@@ -109,7 +109,6 @@ class UsersPartialView(View):
                         first_name=user['first_name'],
                         last_name=user['last_name'],
                         patronymic=user['patronymic'],
-                        email=user['email'],
                     )
                     for user in users
                 ]
