@@ -39,14 +39,14 @@ class Iva(models.Model):
         verbose_name='Время добавления',
     )
 
+    class Meta:
+        indexes = [
+            models.Index(fields=['learning_track_id', 'course_id']),
+        ]
+
     def __str__(self):
         return (
             f'{self.learning_track_name} ({self.learning_track_id}) -> '
             f'{self.course_id} ({self.course_name}) -> '
             f'{self.user_id} ({self.fio}) - {self.duration}'
         )
-
-    class Meta:
-        indexes = [
-            models.Index(fields=["learning_track_id", "course_id"]),
-        ]

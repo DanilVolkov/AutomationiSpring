@@ -44,9 +44,69 @@ document.addEventListener('DOMContentLoaded', function () {
 
     let selectedCourseId = null;
 
+    // ==================== Утилиты ====================
+
     function getCsrfToken() {
         const m = document.cookie.match(/csrftoken=([^;]+)/);
         return m ? m[1] : '';
+    }
+
+    function escapeHtml(str) {
+        return String(str || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    /**
+     * Безопасно читает ответ сервера.
+     * Возвращает { ok, status, data, text, isJson }.
+     */
+    async function readResponse(response) {
+        const contentType = response.headers.get('content-type') || '';
+        const isJson = contentType.includes('application/json');
+
+        if (isJson) {
+            try {
+                const data = await response.json();
+                return {
+                    ok: response.ok && (!data || data.ok !== false),
+                    status: response.status,
+                    data,
+                    isJson: true,
+                };
+            } catch (err) {
+                return {
+                    ok: false,
+                    status: response.status,
+                    error: 'Некорректный JSON: ' + err.message,
+                    isJson: true,
+                };
+            }
+        }
+
+        let text = '';
+        try {
+            text = await response.text();
+        } catch (_) { /* ignore */ }
+
+        return {
+            ok: false,
+            status: response.status,
+            text,
+            isJson: false,
+        };
+    }
+
+    function buildErrorHtml(title, message) {
+        return `
+            <div class="alert alert-danger">
+                <strong>${escapeHtml(title)}:</strong> ${escapeHtml(message)}
+                <button class="btn btn-sm btn-outline-danger ms-3"
+                        onclick="window.location.reload()">Повторить</button>
+            </div>`;
     }
 
     function showToast(msg, type, duration = null) {
@@ -59,7 +119,7 @@ document.addEventListener('DOMContentLoaded', function () {
         const el = document.createElement('div');
         el.className = `toast align-items-center ${cls} border-0`;
         el.innerHTML = `<div class="d-flex">
-            <div class="toast-body">${msg}</div>
+            <div class="toast-body">${escapeHtml(msg)}</div>
             <button type="button" class="btn-close btn-close-white me-2 m-auto"
                     data-bs-dismiss="toast"></button>
         </div>`;
@@ -77,21 +137,53 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    // ---------- Загрузка курсов ----------
+    // ==================== Загрузка курсов ====================
+
     fetch(`/track/${encodeURIComponent(trackId)}/iva-select-course/data/`, {
         headers: {'X-Requested-With': 'XMLHttpRequest'},
     })
-    .then(r => r.json())
-    .then(data => {
-        if (!data.ok) {
-            container.innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
+    .then(readResponse)
+    .then(result => {
+        // ---------- JSON с ошибкой ----------
+        if (result.isJson && result.data && result.data.ok === false) {
+            container.innerHTML = buildErrorHtml(
+                'Не удалось загрузить список курсов',
+                result.data.error || 'неизвестная ошибка'
+            );
             return;
         }
-        renderCourses(data.courses);
+
+        // ---------- JSON с успехом ----------
+        if (result.ok && result.data) {
+            renderCourses(result.data.courses || []);
+            return;
+        }
+
+        // ---------- Не-JSON (HTML-страница ошибки) ----------
+        if (!result.isJson) {
+            console.error('Server returned non-JSON:', result.status, result.text);
+            container.innerHTML = buildErrorHtml(
+                `Ошибка сервера (${result.status})`,
+                'Проверьте логи сервера или попробуйте позже.'
+            );
+            return;
+        }
+
+        // ---------- Неожиданный ответ ----------
+        container.innerHTML = buildErrorHtml(
+            'Неожиданный ответ',
+            'Формат ответа не распознан.'
+        );
     })
     .catch(err => {
-        container.innerHTML = `<div class="alert alert-danger">${err.message}</div>`;
+        console.error('Fetch error:', err);
+        container.innerHTML = buildErrorHtml(
+            'Сетевая ошибка',
+            err.message || 'не удалось связаться с сервером'
+        );
     });
+
+    // ==================== Отрисовка курсов ====================
 
     function renderCourses(courses) {
         if (!courses.length) {
@@ -116,11 +208,14 @@ document.addEventListener('DOMContentLoaded', function () {
             item.className = 'list-group-item d-flex align-items-center gap-3';
             item.style.cursor = 'pointer';
 
+            // Экранируем title на случай спецсимволов
+            const safeTitle = escapeHtml(c.title || '—');
+
             item.innerHTML = `
                 <input type="radio" name="course" class="form-check-input mt-0"
-                       value="${c.id}">
+                       value="${escapeHtml(c.id)}">
                 <div class="flex-grow-1">
-                    <div class="fw-semibold">${c.title}</div>
+                    <div class="fw-semibold">${safeTitle}</div>
                 </div>`;
 
             const radio = item.querySelector('input');
@@ -133,7 +228,8 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    // ---------- Далее ----------
+    // ==================== Далее ====================
+
     btnNext.addEventListener('click', function () {
         if (!selectedCourseId) return;
 
@@ -147,27 +243,57 @@ document.addEventListener('DOMContentLoaded', function () {
             },
             body: JSON.stringify({ course_id: selectedCourseId }),
         })
-        .then(r => r.json())
-        .then(data => {
-            if (!data.ok) {
-                showToast('Ошибка: ' + (data.error || 'неизвестная'), 'danger');
-                btnNext.disabled = false;
+        .then(readResponse)
+        .then(result => {
+            // ---------- Не-JSON ----------
+            if (!result.isJson) {
+                console.error('Server returned non-JSON:', result.status, result.text);
+                showToast(
+                    `Ошибка сервера (${result.status}). Смотрите логи.`,
+                    'danger'
+                );
                 return;
             }
-            window.location.href = data.redirect;
+
+            const data = result.data || {};
+
+            // ---------- Ошибка ----------
+            if (data.ok === false) {
+                showToast('Ошибка: ' + (data.error || 'неизвестная'), 'danger');
+                return;
+            }
+
+            // ---------- Успех ----------
+            if (data.redirect) {
+                window.location.href = data.redirect;
+            }
         })
         .catch(err => {
+            console.error('Fetch error:', err);
             showToast('Ошибка сети: ' + err.message, 'danger');
-            btnNext.disabled = false;
-        });
+        })
+        .finally(() => { btnNext.disabled = false; });
     });
 
-    // ---------- Отмена ----------
+    // ==================== Отмена ====================
+
     btnCancel.addEventListener('click', function () {
+        btnCancel.disabled = true;
+
         fetch(`/track/${encodeURIComponent(trackId)}/iva-cancel/`, {
             method: 'POST',
             headers: { 'X-CSRFToken': getCsrfToken() },
-        }).finally(() => {
+        })
+        .then(readResponse)
+        .then(result => {
+            if (!result.isJson) {
+                console.error('Server returned non-JSON:', result.status, result.text);
+            }
+        })
+        .catch(err => {
+            console.error('Fetch error:', err);
+        })
+        .finally(() => {
             window.location.href = `/track/${trackId}/`;
         });
     });

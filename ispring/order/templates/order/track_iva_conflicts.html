@@ -46,18 +46,84 @@ document.addEventListener('DOMContentLoaded', function () {
 
     let conflicts = [];
 
+    // ==================== Утилиты ====================
+
     function getCsrfToken() {
         const m = document.cookie.match(/csrftoken=([^;]+)/);
         return m ? m[1] : '';
     }
 
-    function showToast(msg, type) {
-        const cls = { success: 'text-bg-success', danger: 'text-bg-danger',
-                      info: 'text-bg-primary' }[type] || 'text-bg-secondary';
+    function escapeHtml(str) {
+        return String(str || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    /**
+     * Безопасно читает ответ сервера.
+     * Возвращает { ok, status, data, text, isJson }.
+     */
+    async function readResponse(response) {
+        const contentType = response.headers.get('content-type') || '';
+        const isJson = contentType.includes('application/json');
+
+        if (isJson) {
+            try {
+                const data = await response.json();
+                return {
+                    ok: response.ok && (!data || data.ok !== false),
+                    status: response.status,
+                    data,
+                    isJson: true,
+                };
+            } catch (err) {
+                return {
+                    ok: false,
+                    status: response.status,
+                    error: 'Некорректный JSON: ' + err.message,
+                    isJson: true,
+                };
+            }
+        }
+
+        let text = '';
+        try {
+            text = await response.text();
+        } catch (_) { /* ignore */ }
+
+        return {
+            ok: false,
+            status: response.status,
+            text,
+            isJson: false,
+        };
+    }
+
+    function buildErrorHtml(title, message) {
+        const safeTitle = escapeHtml(title);
+        const safeMessage = escapeHtml(message);
+        return `
+            <div class="alert alert-danger mt-3" role="alert">
+                <strong>${safeTitle}:</strong> ${safeMessage}
+            </div>`;
+    }
+
+    function showToast(message, type) {
+        const cls = {
+            success: 'text-bg-success',
+            danger:  'text-bg-danger',
+            info:    'text-bg-primary',
+            warning: 'text-bg-warning',
+        }[type] || 'text-bg-secondary';
+
         const el = document.createElement('div');
         el.className = `toast align-items-center ${cls} border-0`;
+        el.setAttribute('role', 'alert');
         el.innerHTML = `<div class="d-flex">
-            <div class="toast-body">${msg}</div>
+            <div class="toast-body">${escapeHtml(message)}</div>
             <button type="button" class="btn-close btn-close-white me-2 m-auto"
                     data-bs-dismiss="toast"></button>
         </div>`;
@@ -67,26 +133,65 @@ document.addEventListener('DOMContentLoaded', function () {
         el.addEventListener('hidden.bs.toast', () => el.remove());
     }
 
-    // ---------- Загрузка конфликтов ----------
+    // ==================== Загрузка конфликтов ====================
+
     fetch(`/track/${encodeURIComponent(trackId)}/iva-conflicts/data/`, {
         headers: {'X-Requested-With': 'XMLHttpRequest'},
     })
-    .then(r => r.json())
-    .then(data => {
-        if (!data.ok) {
-            container.innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
+    .then(readResponse)
+    .then(result => {
+        // ---------- JSON с ошибкой ----------
+        if (result.isJson && result.data && result.data.ok === false) {
+            container.innerHTML = buildErrorHtml(
+                'Не удалось загрузить конфликты',
+                result.data.error || 'неизвестная ошибка'
+            );
             return;
         }
-        conflicts = data.conflicts;
-        renderConflicts();
+
+        // ---------- JSON с успехом ----------
+        if (result.ok && result.data) {
+            conflicts = result.data.conflicts || [];
+            renderConflicts();
+            return;
+        }
+
+        // ---------- Не-JSON (HTML-страница ошибки) ----------
+        if (!result.isJson) {
+            console.error('Server returned non-JSON:', result.status, result.text);
+            container.innerHTML = buildErrorHtml(
+                `Ошибка сервера (${result.status})`,
+                'Проверьте логи сервера или попробуйте позже.'
+            );
+            return;
+        }
+
+        // ---------- Неожиданный ответ ----------
+        container.innerHTML = buildErrorHtml(
+            'Неожиданный ответ',
+            'Формат ответа не распознан.'
+        );
     })
     .catch(err => {
-        container.innerHTML = `<div class="alert alert-danger">${err.message}</div>`;
+        console.error('Fetch error:', err);
+        container.innerHTML = buildErrorHtml(
+            'Сетевая ошибка',
+            err.message || 'не удалось связаться с сервером'
+        );
     });
 
-    // ---------- Отрисовка ----------
+    // ==================== Отрисовка ====================
+
     function renderConflicts() {
         container.innerHTML = '';
+
+        if (!conflicts.length) {
+            container.innerHTML = `
+                <div class="alert alert-info">
+                    Конфликтов не обнаружено.
+                </div>`;
+            return;
+        }
 
         conflicts.forEach((c, i) => {
             const card = document.createElement('div');
@@ -94,65 +199,63 @@ document.addEventListener('DOMContentLoaded', function () {
             card.dataset.index = i;
 
             card.innerHTML = `
-                    <div class="row align-items-stretch g-3">
+                <div class="row align-items-stretch g-3">
 
-                        <div class="col-md-5">
-                            ${renderUserBlock(c.left, `left-${i}`, 'Вариант А')}
+                    <div class="col-md-5">
+                        ${renderUserBlock(c.left, `left-${i}`, 'Вариант А')}
+                    </div>
+
+                    <div class="col-md-2 d-flex flex-column justify-content-center
+                                align-items-center">
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio"
+                                   name="choice-${i}" value="left"
+                                   id="choice-left-${i}" checked>
+                            <label class="form-check-label small"
+                                   for="choice-left-${i}">
+                                Взять А
+                            </label>
                         </div>
-
-                        <div class="col-md-2 d-flex flex-column justify-content-center
-                                    align-items-center">
-                            <div class="form-check">
-                                <input class="form-check-input" type="radio"
-                                       name="choice-${i}" value="left"
-                                       id="choice-left-${i}" checked>
-                                <label class="form-check-label small"
-                                       for="choice-left-${i}">
-                                    Взять А
-                                </label>
-                            </div>
-                            <div class="form-check">
-                                <input class="form-check-input" type="radio"
-                                       name="choice-${i}" value="right"
-                                       id="choice-right-${i}">
-                                <label class="form-check-label small"
-                                       for="choice-right-${i}">
-                                    Взять Б
-                                </label>
-                            </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio"
+                                   name="choice-${i}" value="right"
+                                   id="choice-right-${i}">
+                            <label class="form-check-label small"
+                                   for="choice-right-${i}">
+                                Взять Б
+                            </label>
                         </div>
+                    </div>
 
-                        <div class="col-md-5">
-                            ${renderUserBlock(c.right, `right-${i}`, 'Вариант Б')}
-                        </div>
+                    <div class="col-md-5">
+                        ${renderUserBlock(c.right, `right-${i}`, 'Вариант Б')}
+                    </div>
 
-                    </div>`;
+                </div>`;
             container.appendChild(card);
         });
     }
 
     function renderUserBlock(u, id, title) {
+        if (!u) u = {};
         return `
             <div class="border rounded p-3 h-100 ${id.startsWith('left') ? 'bg-light' : ''}">
-                <div class="text-muted small mb-2">${title}</div>
-                <div class="fw-semibold mb-1">${u.fio || '—'}</div>
-                <div class="small text-muted">Email: ${u.email || '—'}</div>
-                <div class="small text-muted">Вход: ${u.entry_time || '—'}</div>
-                <div class="small text-muted">Выход: ${u.exit_time || '—'}</div>
-                <div class="small text-muted">Длительность: ${u.duration || '—'}</div>
-                <div class="small text-muted">Устройство: ${u.device || '—'}</div>
-                <div class="small text-muted">IP: ${u.ip_address || '—'}</div>
+                <div class="text-muted small mb-2">${escapeHtml(title)}</div>
+                <div class="fw-semibold mb-1">${escapeHtml(u.fio || '—')}</div>
+                <div class="small text-muted">Email: ${escapeHtml(u.email || '—')}</div>
+                <div class="small text-muted">Вход: ${escapeHtml(u.entry_time || '—')}</div>
+                <div class="small text-muted">Выход: ${escapeHtml(u.exit_time || '—')}</div>
+                <div class="small text-muted">Длительность: ${escapeHtml(u.duration || '—')}</div>
+                <div class="small text-muted">Устройство: ${escapeHtml(u.device || '—')}</div>
+                <div class="small text-muted">IP: ${escapeHtml(u.ip_address || '—')}</div>
                 ${u.user_id_ispring
-                    ? `<div class="small text-success mt-2">
-                           Найден в iSpring
-                       </div>`
-                    : `<div class="small text-warning mt-2">
-                           Не найден в iSpring
-                       </div>`}
+                    ? `<div class="small text-success mt-2">Найден в iSpring</div>`
+                    : `<div class="small text-warning mt-2">Не найден в iSpring</div>`}
             </div>`;
     }
 
-    // ---------- Разрешить ----------
+    // ==================== Разрешить ====================
+
     btnResolve.addEventListener('click', function () {
         const choices = {};
         document.querySelectorAll('.conflict-card').forEach(card => {
@@ -171,24 +274,57 @@ document.addEventListener('DOMContentLoaded', function () {
             },
             body: JSON.stringify({ choices }),
         })
-        .then(r => r.json())
-        .then(data => {
-            if (!data.ok) {
+        .then(readResponse)
+        .then(result => {
+            // ---------- Не-JSON ----------
+            if (!result.isJson) {
+                console.error('Server returned non-JSON:', result.status, result.text);
+                showToast(
+                    `Ошибка сервера (${result.status}). Смотрите логи.`,
+                    'danger'
+                );
+                return;
+            }
+
+            const data = result.data || {};
+
+            // ---------- Ошибка ----------
+            if (data.ok === false) {
                 showToast('Ошибка: ' + (data.error || 'неизвестная'), 'danger');
                 return;
             }
-            window.location.href = data.redirect;
+
+            // ---------- Успех ----------
+            if (data.redirect) {
+                window.location.href = data.redirect;
+            }
         })
-        .catch(err => showToast('Ошибка сети: ' + err.message, 'danger'))
+        .catch(err => {
+            console.error('Fetch error:', err);
+            showToast('Ошибка сети: ' + err.message, 'danger');
+        })
         .finally(() => { btnResolve.disabled = false; });
     });
 
-    // ---------- Отменить ----------
+    // ==================== Отменить ====================
+
     btnCancel.addEventListener('click', function () {
+        btnCancel.disabled = true;
+
         fetch(`/track/${encodeURIComponent(trackId)}/iva-conflicts/cancel/`, {
             method: 'POST',
-            headers: { 'X-CSRFToken': getCsrfToken() },
-        }).finally(() => {
+            headers: {'X-CSRFToken': getCsrfToken()},
+        })
+        .then(readResponse)
+        .then(result => {
+            if (!result.isJson) {
+                console.error('Server returned non-JSON:', result.status, result.text);
+            }
+        })
+        .catch(err => {
+            console.error('Fetch error:', err);
+        })
+        .finally(() => {
             window.location.href = `/track/${trackId}/`;
         });
     });

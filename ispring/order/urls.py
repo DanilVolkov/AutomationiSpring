@@ -28,13 +28,16 @@ urlpatterns = [
         views.TrackDetailPartialView.as_view(),
         name='track_detail_partial',
     ),
-    path('track/<str:track_id>/short/',
-         views.TrackShortPageView.as_view(),
-         name='track_short'),
-
-    path('partial/track/<str:track_id>/short/',
-         views.TrackShortPartialView.as_view(),
-         name='track_short_partial'),
+    path(
+        'track/<str:track_id>/short/',
+        views.TrackShortPageView.as_view(),
+        name='track_short',
+    ),
+    path(
+        'partial/track/<str:track_id>/short/',
+        views.TrackShortPartialView.as_view(),
+        name='track_short_partial',
+    ),
     path(
         'track/<str:track_id>/export.xlsx/',
         views.TrackExportExcelView.as_view(),
@@ -96,16 +99,14 @@ urlpatterns = [
         views.TrackIvaApplyView.as_view(),
         name='track_iva_apply',
     ),
-
     path(
         'iva/download-csv/',
-         views.IvaDownloadCsvView.as_view(),
-         name='iva_download_csv'
+        views.IvaDownloadCsvView.as_view(),
+        name='iva_download_csv',
     ),
-
     path(
         'iva/upload-csv/',
-         views.IvaUploadCsvView.as_view(),
-         name='iva_upload_csv'
+        views.IvaUploadCsvView.as_view(),
+        name='iva_upload_csv',
     ),
 ]

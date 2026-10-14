@@ -5,7 +5,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ('order', '0005_alter_iva_duration'),
     ]
@@ -14,6 +13,9 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='iva',
             name='created_at',
-            field=models.DateTimeField(default=django.utils.timezone.now, verbose_name='Время добавления'),
+            field=models.DateTimeField(
+                default=django.utils.timezone.now,
+                verbose_name='Время добавления',
+            ),
         ),
     ]

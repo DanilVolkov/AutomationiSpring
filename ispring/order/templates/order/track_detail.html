@@ -62,46 +62,77 @@ document.addEventListener('DOMContentLoaded', function () {
     const crumbsEl  = document.getElementById('breadcrumbs-container');
     const trackId   = "{{ track_id|escapejs }}";
 
-    // ==================== Загрузка таблицы траектории ====================
-    fetch(`/partial/track/${encodeURIComponent(trackId)}/`, {
-        headers: {'X-Requested-With': 'XMLHttpRequest'}
-    })
-        .then(r => r.json())
-        .then(data => {
-            if (!data.ok) {
-                container.innerHTML =
-                    `<div class="alert alert-danger mt-3" role="alert">
-                         Не удалось загрузить данные: ${data.error}
-                         <button class="btn btn-sm btn-outline-danger ms-3"
-                                 onclick="window.location.reload()">Повторить</button>
-                     </div>`;
-                return;
-            }
-            container.innerHTML = data.html;
-            if (data.breadcrumbs_html !== undefined) {
-                crumbsEl.innerHTML = data.breadcrumbs_html;
-            }
-        })
-        .catch(err => {
-            container.innerHTML =
-                `<div class="alert alert-danger mt-3" role="alert">
-                     Произошла ошибка: ${err.message}
-                     <button class="btn btn-sm btn-outline-danger ms-3"
-                             onclick="window.location.reload()">Повторить</button>
-                 </div>`;
-        });
-
-    // ==================== Загрузка CSV из ИВА ====================
-    const btnUpload  = document.getElementById('btn-upload-iva');
-    const btnSpinner = document.getElementById('btn-upload-iva-spinner');
-    const btnLabel   = document.getElementById('btn-upload-iva-label');
-    const fileInput  = document.getElementById('iva-file-input');
-
     const toastContainer = document.getElementById('toast-container');
+
+    // ==================== Утилиты ====================
 
     function getCsrfToken() {
         const m = document.cookie.match(/csrftoken=([^;]+)/);
         return m ? m[1] : '';
+    }
+
+    /**
+     * Безопасно читает ответ сервера.
+     * Возвращает { ok, status, data, text, isJson }.
+     */
+    async function readResponse(response) {
+        const contentType = response.headers.get('content-type') || '';
+        const isJson = contentType.includes('application/json');
+
+        if (isJson) {
+            try {
+                const data = await response.json();
+                return {
+                    ok: response.ok && (!data || data.ok !== false),
+                    status: response.status,
+                    data,
+                    isJson: true,
+                };
+            } catch (err) {
+                return {
+                    ok: false,
+                    status: response.status,
+                    error: 'Некорректный JSON: ' + err.message,
+                    isJson: true,
+                };
+            }
+        }
+
+        // Не JSON — читаем как текст (обычно HTML-страница ошибки)
+        let text = '';
+        try {
+            text = await response.text();
+        } catch (_) { /* ignore */ }
+
+        return {
+            ok: false,
+            status: response.status,
+            text,
+            isJson: false,
+        };
+    }
+
+    /**
+     * Строит HTML блока ошибки.
+     */
+    function buildErrorHtml(title, message) {
+        const safeTitle = escapeHtml(title);
+        const safeMessage = escapeHtml(message);
+        return `
+            <div class="alert alert-danger mt-3" role="alert">
+                <strong>${safeTitle}:</strong> ${safeMessage}
+                <button class="btn btn-sm btn-outline-danger ms-3"
+                        onclick="window.location.reload()">Повторить</button>
+            </div>`;
+    }
+
+    function escapeHtml(str) {
+        return String(str || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
     }
 
     function showToast(message, type) {
@@ -119,7 +150,7 @@ document.addEventListener('DOMContentLoaded', function () {
         el.setAttribute('aria-atomic', 'true');
         el.innerHTML = `
             <div class="d-flex">
-                <div class="toast-body">${message}</div>
+                <div class="toast-body">${escapeHtml(message)}</div>
                 <button type="button" class="btn-close btn-close-white me-2 m-auto"
                         data-bs-dismiss="toast" aria-label="Закрыть"></button>
             </div>`;
@@ -128,6 +159,61 @@ document.addEventListener('DOMContentLoaded', function () {
         t.show();
         el.addEventListener('hidden.bs.toast', () => el.remove());
     }
+
+    // ==================== Загрузка таблицы траектории ====================
+
+    fetch(`/partial/track/${encodeURIComponent(trackId)}/`, {
+        headers: {'X-Requested-With': 'XMLHttpRequest'}
+    })
+        .then(readResponse)
+        .then(result => {
+            // ---------- JSON-ответ с ошибкой ----------
+            if (result.isJson && result.data && result.data.ok === false) {
+                container.innerHTML = buildErrorHtml(
+                    'Не удалось загрузить данные',
+                    result.data.error || 'неизвестная ошибка'
+                );
+                return;
+            }
+
+            // ---------- JSON-ответ с успехом ----------
+            if (result.ok && result.data) {
+                container.innerHTML = result.data.html;
+                if (result.data.breadcrumbs_html !== undefined) {
+                    crumbsEl.innerHTML = result.data.breadcrumbs_html;
+                }
+                return;
+            }
+
+            // ---------- Не-JSON (HTML-страница ошибки) ----------
+            if (!result.isJson) {
+                console.error('Server returned non-JSON:', result.status, result.text);
+                container.innerHTML = buildErrorHtml(
+                    `Ошибка сервера (${result.status})`,
+                    'Проверьте логи сервера или попробуйте позже.'
+                );
+                return;
+            }
+
+            // ---------- Всё остальное ----------
+            container.innerHTML = buildErrorHtml(
+                'Неожиданный ответ',
+                'Формат ответа не распознан.'
+            );
+        })
+        .catch(err => {
+            console.error('Fetch error:', err);
+            container.innerHTML = buildErrorHtml(
+                'Сетевая ошибка',
+                err.message || 'не удалось связаться с сервером'
+            );
+        });
+
+    // ==================== Загрузка CSV из ИВА ====================
+    const btnUpload  = document.getElementById('btn-upload-iva');
+    const btnSpinner = document.getElementById('btn-upload-iva-spinner');
+    const btnLabel   = document.getElementById('btn-upload-iva-label');
+    const fileInput  = document.getElementById('iva-file-input');
 
     // ---------- Открыть выбор файла ----------
     btnUpload.addEventListener('click', function () {
@@ -158,27 +244,43 @@ document.addEventListener('DOMContentLoaded', function () {
             },
             body: formData,
         })
-        .then(r => r.json())
-        .then(data => {
-            // ---------- Ошибка без redirect ----------
-            if (!data.ok && !data.redirect) {
-                showToast('Ошибка: ' + (data.error || 'неизвестная'), 'danger');
+        .then(readResponse)
+        .then(result => {
+            // ---------- Не-JSON ----------
+            if (!result.isJson) {
+                console.error('Server returned non-JSON:', result.status, result.text);
+                showToast(
+                    `Ошибка сервера (${result.status}). Смотрите логи.`,
+                    'danger'
+                );
                 return;
             }
 
-            // ---------- Переход на страницу (конфликты или финальная таблица) ----------
+            const data = result.data || {};
+
+            // ---------- Ошибка без redirect ----------
+            if (data.ok === false && !data.redirect) {
+                showToast(
+                    'Ошибка: ' + (data.error || 'неизвестная'),
+                    'danger'
+                );
+                return;
+            }
+
+            // ---------- Переход на страницу ----------
             if (data.redirect) {
                 window.location.href = data.redirect;
                 return;
             }
 
-            // ---------- Фолбэк: если сервер вернул html напрямую ----------
+            // ---------- Успех с HTML ----------
             if (data.ok && data.html !== undefined) {
                 container.innerHTML = data.html;
                 showToast(`Загружено строк: ${data.rows_count}`, 'success');
             }
         })
         .catch(err => {
+            console.error('Fetch error:', err);
             showToast('Ошибка сети: ' + err.message, 'danger');
         })
         .finally(() => {

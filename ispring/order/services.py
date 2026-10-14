@@ -1,12 +1,10 @@
 import functools
-import json
 import time
 from collections import defaultdict
-from dataclasses import asdict
 from functools import lru_cache
 
 import requests
-from ispring.settings import ISPRING_DEFAULT_FOLDER_ID, ISPRING_API_HOST_TOKEN
+from ispring.settings import ISPRING_API_HOST_TOKEN, ISPRING_DEFAULT_FOLDER_ID
 from requests import HTTPError
 
 from ispring import settings
@@ -119,7 +117,7 @@ class IspringApi:
                     title=item['title'],
                     type=item['type'],
                     added_date=item['addedDate'],
-                    view_url=f'{ISPRING_API_HOST_TOKEN}/content/{item['itemId']}/edit/outline',
+                    view_url=f'{ISPRING_API_HOST_TOKEN}/content/{item["itemId"]}/edit/outline',
                     parent_id=item['parentId'],
                 )
             elif item.get('type') == 'Folder':
@@ -324,7 +322,9 @@ class IspringApi:
                 try:
                     user = User.objects.get(user_id=item['userId'])
                 except User.DoesNotExist:
-                    raise User.DoesNotExist('Обновите пользователей на главной странице')
+                    raise User.DoesNotExist(
+                        'Обновите пользователей на главной странице'
+                    ) from None
                 users[item['userId']] = user
 
             user_results = UserResults(

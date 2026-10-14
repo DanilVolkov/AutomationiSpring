@@ -98,6 +98,62 @@
 
     const toastContainer = document.getElementById('toast-container');
 
+    // ==================== Утилиты ====================
+
+    function getCsrfToken() {
+        const match = document.cookie.match(/csrftoken=([^;]+)/);
+        return match ? match[1] : '';
+    }
+
+    function escapeHtml(str) {
+        return String(str || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    /**
+     * Безопасно читает ответ сервера.
+     * Возвращает { ok, status, data, text, isJson }.
+     */
+    async function readResponse(response) {
+        const contentType = response.headers.get('content-type') || '';
+        const isJson = contentType.includes('application/json');
+
+        if (isJson) {
+            try {
+                const data = await response.json();
+                return {
+                    ok: response.ok && (!data || data.ok !== false),
+                    status: response.status,
+                    data,
+                    isJson: true,
+                };
+            } catch (err) {
+                return {
+                    ok: false,
+                    status: response.status,
+                    error: 'Некорректный JSON: ' + err.message,
+                    isJson: true,
+                };
+            }
+        }
+
+        let text = '';
+        try {
+            text = await response.text();
+        } catch (_) { /* ignore */ }
+
+        return {
+            ok: false,
+            status: response.status,
+            text,
+            isJson: false,
+        };
+    }
+
     function showToast(message, type, duration = null) {
         const bgClass = {
             success: 'text-bg-success',
@@ -134,12 +190,37 @@
         });
     }
 
-    function getCsrfToken() {
-        const match = document.cookie.match(/csrftoken=([^;]+)/);
-        return match ? match[1] : '';
+    /**
+     * Универсальный обработчик результата readResponse для toast-сообщений.
+     * Возвращает data при успехе, null при ошибке (и показывает toast).
+     */
+    function handleResult(result, errorPrefix = 'Ошибка') {
+        // ---------- Не-JSON (HTML-страница 500/404) ----------
+        if (!result.isJson) {
+            console.error('Server returned non-JSON:', result.status, result.text);
+            showToast(
+                `${escapeHtml(errorPrefix)}: сервер вернул ошибку ${result.status}. Смотрите логи.`,
+                'danger'
+            );
+            return null;
+        }
+
+        const data = result.data || {};
+
+        // ---------- Логическая ошибка ----------
+        if (data.ok === false) {
+            showToast(
+                `${escapeHtml(errorPrefix)}: ${escapeHtml(data.error || 'неизвестная ошибка')}`,
+                'danger'
+            );
+            return null;
+        }
+
+        return data;
     }
 
-    // ---------- Загрузка папок ----------
+    // ==================== Загрузка папок ====================
+
     function loadFolderItems() {
         const url = new URL(window.location.href);
         const itemId = url.searchParams.get('item_id') || '';
@@ -147,13 +228,36 @@
         return fetch(`/partial/folder-items/?item_id=${encodeURIComponent(itemId)}`, {
             headers: { 'X-Requested-With': 'XMLHttpRequest' }
         })
-        .then(r => r.json())
-        .then(data => {
-            if (!data.ok) {
-                listEl.innerHTML =
-                    `<div class="alert alert-danger mt-3">${data.error}</div>`;
+        .then(readResponse)
+        .then(result => {
+            // Не-JSON
+            if (!result.isJson) {
+                console.error('Server returned non-JSON:', result.status, result.text);
+                listEl.innerHTML = `
+                    <div class="alert alert-danger mt-3" role="alert">
+                        <strong>Ошибка сервера (${result.status}).</strong>
+                        Проверьте логи сервера или попробуйте позже.
+                        <button class="btn btn-sm btn-outline-danger ms-3"
+                                onclick="window.location.reload()">Повторить</button>
+                    </div>`;
                 return;
             }
+
+            const data = result.data || {};
+
+            // Логическая ошибка
+            if (data.ok === false) {
+                listEl.innerHTML = `
+                    <div class="alert alert-danger mt-3" role="alert">
+                        <strong>Не удалось загрузить данные:</strong>
+                        ${escapeHtml(data.error || 'неизвестная ошибка')}
+                        <button class="btn btn-sm btn-outline-danger ms-3"
+                                onclick="window.location.reload()">Повторить</button>
+                    </div>`;
+                return;
+            }
+
+            // Успех
             if (data.synced) {
                 showToast('Данные из iSpring загружены', 'success');
             }
@@ -161,34 +265,48 @@
             if (data.breadcrumbs_html !== undefined) {
                 crumbsEl.innerHTML = data.breadcrumbs_html;
             }
+        })
+        .catch(err => {
+            console.error('Fetch error:', err);
+            listEl.innerHTML = `
+                <div class="alert alert-danger mt-3" role="alert">
+                    <strong>Сетевая ошибка:</strong> ${escapeHtml(err.message)}
+                    <button class="btn btn-sm btn-outline-danger ms-3"
+                            onclick="window.location.reload()">Повторить</button>
+                </div>`;
         });
     }
 
-    // ---------- Загрузка пользователей ----------
+    // ==================== Загрузка пользователей ====================
+
     function loadUsers() {
         return fetch('/partial/users/', {
             headers: { 'X-Requested-With': 'XMLHttpRequest' }
         })
-        .then(r => r.json())
-        .then(data => {
+        .then(readResponse)
+        .then(result => {
             userListEl.innerHTML = '';
-            if (!data.ok) {
-                showToast('Ошибка загрузки пользователей: ' +
-                          (data.error || 'неизвестная'), 'danger');
-                return;
-            }
+
+            const data = handleResult(result, 'Ошибка загрузки пользователей');
+            if (!data) return;
+
             if (data.synced) {
                 showToast(`Пользователи из iSpring загружены: ${data.count}`, 'success');
             }
         })
-        .catch(err => showToast('Произошла ошибка: ' + err.message, 'danger'));
+        .catch(err => {
+            console.error('Fetch error:', err);
+            showToast('Произошла ошибка: ' + err.message, 'danger');
+        });
     }
 
-    // ---------- Автозагрузка при открытии ----------
+    // ==================== Автозагрузка при открытии ====================
+
     loadFolderItems();
     loadUsers();
 
-    // ---------- Кнопка "Обновить курсы" ----------
+    // ==================== Кнопка "Обновить курсы" ====================
+
     btnCourses.addEventListener('click', function () {
         btnCourses.disabled = true;
         spinnerCourses.classList.remove('d-none');
@@ -201,15 +319,16 @@
                 'X-Requested-With': 'XMLHttpRequest',
             },
         })
-        .then(r => r.json())
-        .then(data => {
-            if (!data.ok) {
-                showToast('Ошибка: ' + (data.error || 'неизвестная'), 'danger');
-                return;
-            }
+        .then(readResponse)
+        .then(result => {
+            const data = handleResult(result, 'Ошибка обновления курсов');
+            if (!data) return;
             return loadFolderItems();
         })
-        .catch(err => showToast('Ошибка: ' + err.message, 'danger'))
+        .catch(err => {
+            console.error('Fetch error:', err);
+            showToast('Ошибка: ' + err.message, 'danger');
+        })
         .finally(() => {
             btnCourses.disabled = false;
             spinnerCourses.classList.add('d-none');
@@ -217,7 +336,8 @@
         });
     });
 
-    // ---------- Кнопка "Обновить пользователей" ----------
+    // ==================== Кнопка "Обновить пользователей" ====================
+
     btnUsers.addEventListener('click', function () {
         btnUsers.disabled = true;
         spinnerUsers.classList.remove('d-none');
@@ -230,15 +350,16 @@
                 'X-Requested-With': 'XMLHttpRequest',
             },
         })
-        .then(r => r.json())
-        .then(data => {
-            if (!data.ok) {
-                showToast('Ошибка: ' + (data.error || 'неизвестная'), 'danger');
-                return;
-            }
+        .then(readResponse)
+        .then(result => {
+            const data = handleResult(result, 'Ошибка обновления пользователей');
+            if (!data) return;
             showToast(`Пользователи загружены: ${data.count}`, 'success');
         })
-        .catch(err => showToast('Ошибка: ' + err.message, 'danger'))
+        .catch(err => {
+            console.error('Fetch error:', err);
+            showToast('Ошибка: ' + err.message, 'danger');
+        })
         .finally(() => {
             btnUsers.disabled = false;
             spinnerUsers.classList.add('d-none');
@@ -246,7 +367,8 @@
         });
     });
 
-    // ---------- Кнопка "Загрузить отчеты" ----------
+    // ==================== Кнопка "Загрузить отчеты" ====================
+
     if (btnUploadIva) {
         btnUploadIva.addEventListener('click', function () {
             ivaFileInput.value = '';
@@ -276,21 +398,22 @@
             },
             body: formData,
         })
-        .then(r => r.json())
-        .then(data => {
-            if (!data.ok) {
-                showToast('Ошибка загрузки: ' + (data.error || 'неизвестная'), 'danger');
-                return;
-            }
+        .then(readResponse)
+        .then(result => {
+            const data = handleResult(result, 'Ошибка загрузки отчётов');
+            if (!data) return;
 
-            const msg = `Отчёты загружены:<br>- Добавлено ${data.created}<br>- Обновлено ${data.updated}`;
+            const msg = `Отчёты загружены:<br>> Добавлено ${data.created ?? 0}<br>> Обновлено ${data.updated ?? 0}`;
             showToast(msg, 'success', 10000);
 
             if (data.errors && data.errors.length) {
                 console.warn('Ошибки при разборе CSV:', data.errors);
             }
         })
-        .catch(err => showToast('Ошибка сети: ' + err.message, 'danger'))
+        .catch(err => {
+            console.error('Fetch error:', err);
+            showToast('Ошибка сети: ' + err.message, 'danger');
+        })
         .finally(() => {
             btnUploadIva.disabled = false;
             spinnerUploadIva.classList.add('d-none');

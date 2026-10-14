@@ -4,7 +4,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ('order', '0003_iva'),
     ]
@@ -12,6 +11,9 @@ class Migration(migrations.Migration):
     operations = [
         migrations.AddIndex(
             model_name='iva',
-            index=models.Index(fields=['learning_track_id', 'course_id'], name='order_iva_learnin_857007_idx'),
+            index=models.Index(
+                fields=['learning_track_id', 'course_id'],
+                name='order_iva_learnin_857007_idx',
+            ),
         ),
     ]

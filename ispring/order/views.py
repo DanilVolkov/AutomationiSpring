@@ -2,20 +2,18 @@ import csv
 import io
 import json
 import uuid
-from dataclasses import asdict
 from datetime import datetime, timedelta
 from io import BytesIO
 
 from django.core.cache import cache
 from django.db import connection, transaction
-from django.db.models import Q
-from django.http import FileResponse, JsonResponse, HttpResponse
+from django.http import FileResponse, HttpResponse, JsonResponse
 from django.template.loader import render_to_string
 from django.views import View
 from django.views.generic import TemplateView
 from ispring.settings import ISPRING_DEFAULT_FOLDER_ID
 
-from order.models import User, Iva
+from order.models import Iva, User
 from order.services import get_ispring_api
 from order.utils import IvaHandler, IvaUser, Table
 
@@ -64,8 +62,11 @@ class SyncCoursesView(View):
 
             return JsonResponse({'ok': True})
 
-        except RuntimeError as e:
-            return JsonResponse({'ok': False, 'error': str(e)}, status=502)
+        except RuntimeError:
+            return JsonResponse(
+                {'ok': False, 'error': 'Произошла непредвиденная ошибка'},
+                status=502,
+            )
 
 
 class SyncUsersView(View):
@@ -89,8 +90,11 @@ class SyncUsersView(View):
             User.objects.bulk_create(objects)
             return JsonResponse({'ok': True, 'count': User.objects.count()})
 
-        except RuntimeError as e:
-            return JsonResponse({'ok': False, 'error': str(e)}, status=502)
+        except RuntimeError:
+            return JsonResponse(
+                {'ok': False, 'error': 'Произошла непредвиденная ошибка'},
+                status=502,
+            )
 
 
 class UsersPartialView(View):
@@ -117,8 +121,11 @@ class UsersPartialView(View):
                 'count': User.objects.count(),
                 'synced': synced,
             })
-        except RuntimeError as e:
-            return JsonResponse({'ok': False, 'error': str(e)}, status=502)
+        except RuntimeError:
+            return JsonResponse(
+                {'ok': False, 'error': 'Произошла непредвиденная ошибка'},
+                status=502,
+            )
 
 
 class FolderItemsPartialView(View):
@@ -154,8 +161,11 @@ class FolderItemsPartialView(View):
                 'synced': synced,
             })
 
-        except RuntimeError as e:
-            return JsonResponse({'ok': False, 'error': str(e)}, status=502)
+        except RuntimeError:
+            return JsonResponse(
+                {'ok': False, 'error': 'Произошла непредвиденная ошибка'},
+                status=502,
+            )
 
 
 class TrackDetailView(TemplateView):
@@ -187,7 +197,8 @@ class TrackDetailPartialView(View):
             if learning_track:
                 # with open('data_results.json', 'w', encoding='utf-8') as f:
                 #     json.dump(
-                #         asdict(learning_track), f, ensure_ascii=False, indent=4
+                #         asdict(learning_track), f, ensure_ascii=False,
+                #         indent=4
                 #     )
                 table = Table(learning_track)
                 cache.set('table', table)
@@ -219,8 +230,11 @@ class TrackDetailPartialView(View):
                 {'ok': False, 'error': str(e)},
                 status=400,
             )
-        except RuntimeError as e:
-            return JsonResponse({'ok': False, 'error': str(e)}, status=502)
+        except RuntimeError:
+            return JsonResponse(
+                {'ok': False, 'error': 'Произошла непредвиденная ошибка'},
+                status=502,
+            )
 
 
 class TrackShortPageView(TemplateView):
@@ -257,8 +271,12 @@ class TrackShortPartialView(View):
                 'breadcrumbs_html': breadcrumbs_html,
             })
 
-        except RuntimeError as e:
-            return JsonResponse({'ok': False, 'error': str(e)}, status=502)
+        except RuntimeError:
+            return JsonResponse(
+                {'ok': False, 'error': 'Произошла непредвиденная ошибка'},
+                status=502,
+            )
+
 
 class TrackExportExcelView(View):
     def get(self, request, track_id, *args, **kwargs):
@@ -288,8 +306,11 @@ class TrackExportExcelView(View):
             )
             return response
 
-        except RuntimeError as e:
-            return JsonResponse({'ok': False, 'error': str(e)}, status=502)
+        except RuntimeError:
+            return JsonResponse(
+                {'ok': False, 'error': 'Произошла непредвиденная ошибка'},
+                status=502,
+            )
 
 
 class TrackUploadIvaView(View):
@@ -656,7 +677,9 @@ class TrackIvaApplyView(View):
         if match:
             course_name = match[0].title
 
-        Iva.objects.filter(learning_track_id=track.id, course_id=course_id).delete()
+        Iva.objects.filter(
+            learning_track_id=track.id, course_id=course_id
+        ).delete()
         db_obj = [
             Iva(
                 learning_track_id=track.id,
@@ -665,7 +688,7 @@ class TrackIvaApplyView(View):
                 course_name=course_name if course_name is not None else '',
                 user_id=iva_user.user_id_ispring,
                 fio=iva_user.fio,
-                duration=int(iva_user.duration.total_seconds())
+                duration=int(iva_user.duration.total_seconds()),
             )
             for iva_user in new_rows
         ]
@@ -691,8 +714,8 @@ class TrackIvaCancelView(View):
         cache.delete('iva_conflicts')
         return JsonResponse({'ok': True})
 
-class IvaDownloadCsvView(View):
 
+class IvaDownloadCsvView(View):
     def get(self, request, *args, **kwargs):
         response = HttpResponse(
             content_type='text/csv; charset=utf-8',
@@ -715,7 +738,7 @@ class IvaDownloadCsvView(View):
             'ID пользователя',
             'ФИО пользователя',
             'Длительность',
-            'Время добавления'
+            'Время добавления',
         ])
 
         for r in Iva.objects.all():
@@ -727,19 +750,19 @@ class IvaDownloadCsvView(View):
                 r.user_id,
                 r.fio,
                 r.duration,
-                r.created_at
+                r.created_at,
             ])
 
         return response
 
 
 class IvaUploadCsvView(View):
-
     def post(self, request, *args, **kwargs):
         csv_file = request.FILES.get('file')
         if not csv_file:
             return JsonResponse(
-                {'ok': False, 'error': 'Файл не передан'}, status=400)
+                {'ok': False, 'error': 'Файл не передан'}, status=400
+            )
 
         try:
             raw = csv_file.read()
@@ -753,14 +776,15 @@ class IvaUploadCsvView(View):
             if text is None:
                 return JsonResponse(
                     {'ok': False, 'error': 'Не удалось определить кодировку'},
-                    status=400)
+                    status=400,
+                )
 
             reader = csv.DictReader(io.StringIO(text), delimiter=';')
             csv_rows = list(reader)
         except Exception as e:
             return JsonResponse(
-                {'ok': False, 'error': f'Ошибка чтения CSV: {e}'},
-                status=400)
+                {'ok': False, 'error': f'Ошибка чтения CSV: {e}'}, status=400
+            )
 
         created_count = 0
         updated_count = 0
@@ -769,24 +793,26 @@ class IvaUploadCsvView(View):
         with transaction.atomic():
             for i, r in enumerate(csv_rows, start=2):
                 try:
-                    learning_track_id =r.get('ID траектории')
+                    learning_track_id = r.get('ID траектории')
                     learning_track_name = r.get('Название траектории')
                     course_id = r.get('ID курса')
                     course_name = r.get('Название курса')
                     user_id = r.get('ID пользователя')
                     fio = r.get('ФИО пользователя')
                     duration = r.get('Длительность')
-                    created_at = datetime.fromisoformat(r.get('Время добавления'))
+                    created_at = datetime.fromisoformat(
+                        r.get('Время добавления')
+                    )
                     obj, created = Iva.objects.get_or_create(
                         learning_track_id=learning_track_id,
                         course_id=course_id,
                         user_id=user_id,
                         defaults={
-                            "learning_track_name": learning_track_name,
-                            "course_name": course_name,
-                            "fio": fio,
-                            "duration": duration,
-                            "created_at": created_at,
+                            'learning_track_name': learning_track_name,
+                            'course_name': course_name,
+                            'fio': fio,
+                            'duration': duration,
+                            'created_at': created_at,
                         },
                     )
 
@@ -799,10 +825,15 @@ class IvaUploadCsvView(View):
                         obj.fio = fio
                         obj.duration = duration
                         obj.created_at = created_at
-                        obj.save(update_fields=[
-                            "learning_track_name", "course_name",
-                            "fio", "duration", "created_at",
-                        ])
+                        obj.save(
+                            update_fields=[
+                                'learning_track_name',
+                                'course_name',
+                                'fio',
+                                'duration',
+                                'created_at',
+                            ]
+                        )
                         updated_count += 1
                 except Exception as e:
                     errors.append(f'Строка {i}: {e}')
@@ -814,4 +845,3 @@ class IvaUploadCsvView(View):
             'errors': errors[:50],
             'total': len(csv_rows),
         })
-
