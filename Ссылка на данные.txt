@@ -1,0 +1,10 @@
+1. Скачать архив:
+https://github.com/DanilVolkov/AutomationiSpring
+
+2. Установить Python:
+https://www.python.org/downloads/
+
+3. Установить UV:
+https://docs.astral.sh/uv/getting-started/installation/
+
+4. Запустить в архиве файл start.bash для MacOS или start.bat для Windows
