@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 
 from django.template.loader import render_to_string
 from openpyxl import Workbook
+from openpyxl.cell import MergedCell
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
@@ -37,7 +38,9 @@ class IvaUser:
     user_id_ispring: str | None = None
 
     @staticmethod
-    def _str_to_datetime(s: str) -> datetime:
+    def _str_to_datetime(s: str) -> datetime | None:
+        if len(s.strip()) == 0:
+            return None
         return datetime.strptime(' '.join(s.split()), '%d.%m.%Y %H:%M')
 
     @classmethod
@@ -300,13 +303,18 @@ class Table:
                 col += cell.colspan
                 continue
 
-            excel_cell = ws.cell(row=1, column=col, value=cell.value)
+            colspan = max(cell.colspan, 1)
+
+            excel_cell = ws.cell(row=1, column=col)
+
+            if not isinstance(excel_cell, MergedCell):
+                excel_cell.value = cell.value
             self._apply_cell_style(excel_cell, cell, is_header=True)
 
             end_row = cell.rowspan
-            end_col = col + (cell.colspan - 1)
+            end_col = col + (colspan - 1)
 
-            if cell.colspan > 1 or cell.rowspan > 1:
+            if colspan > 1 or cell.rowspan > 1:
                 ws.merge_cells(
                     start_row=1,
                     start_column=col,
@@ -319,7 +327,7 @@ class Table:
                         self._apply_cell_style(
                             ws.cell(row=r, column=c), cell, is_header=True
                         )
-            col += cell.colspan
+            col += colspan
 
         # Модули
         col = 3
@@ -384,24 +392,23 @@ class Table:
         new_header_bottom: list[Cell] = []
         new_rows: list[list[Cell]] = []
 
-        counter_colspan = 0
         colspans = [c.colspan for c in header_top[2:]]
+        course_idx = 0
         for hb_cell in header_bottom:
             if hb_cell.value in ['Лекция итог', 'ДЗ итог']:
                 new_header_bottom.append(hb_cell)
             else:
-                colspans[counter_colspan] -= 1
+                if 0 <= course_idx < len(colspans):
+                    colspans[course_idx] = max(colspans[course_idx] - 1, 1)
             if hb_cell.note == 'end':
-                counter_colspan += 1
+                course_idx += 1
 
         for i, colspan in enumerate(colspans, start=2):
-            header_top[i].colspan = colspan
+            header_top[i].colspan = max(colspan, 1)
 
         for row in rows:
-            new_row: list[Cell] = []
-            for cell in row:
-                if cell.note in ['№', 'ФИО', 'Лекция итог', 'ДЗ итог']:
-                    new_row.append(cell)
+            new_row = [c for c in row if
+                       c.note in ['№', 'ФИО', 'Лекция итог', 'ДЗ итог']]
             new_rows.append(new_row)
         return header_top, new_header_bottom, new_rows
 
@@ -498,12 +505,12 @@ class Table:
         for course in self.track.courses:
             if not course.modules:
                 # Пустой курс — пустая ячейка в нижней шапке.
-                header.append(
-                    Cell(value='', css='border-dark border-end border-bottom')
-                )
-                course_headers[course.id].append(
-                    Cell(value='', css='border-dark border-end border-bottom')
-                )
+                empty = Cell(value='',
+                             css='border-dark border-end border-bottom',
+                             note='end'
+                             )
+                header.append(empty)
+                course_headers[course.id].append(empty)
                 continue
 
             lecture = []
