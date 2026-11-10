@@ -1,6 +1,8 @@
 import functools
+import json
 import time
 from collections import defaultdict
+from dataclasses import asdict
 from functools import lru_cache
 
 import requests
@@ -301,8 +303,8 @@ class IspringApi:
         id_courses = list(map(lambda x: x.id, courses))
         data = self._get_lessons_and_materials_results(id_courses)
 
-        # with open("data_courses.json", "w", encoding="utf-8") as f:
-        #     json.dump(data, f, ensure_ascii=False, indent=4)
+        with open("data_courses.json", "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
 
         self._set_user_results(data)
 

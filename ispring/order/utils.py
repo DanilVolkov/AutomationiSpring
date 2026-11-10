@@ -214,7 +214,7 @@ class Table:
         return wb
 
     def _parse_css(self, css: str):
-        fill = border = None
+        fill = None
         for item in css.split():
             if item in self.fill_map:
                 fill = PatternFill(
@@ -598,6 +598,8 @@ class Table:
                 ),
             ]
 
+            is_user_results = True
+
             for course in self.track.courses:
                 if not course.modules:
                     row.append(Cell(value='', css='empty'))
@@ -632,6 +634,10 @@ class Table:
                     user_results = self._find_user_results_in_module(
                         module, user_id
                     )
+                    if user_results is None:
+                        is_user_results = False
+                        break
+
                     row.append(
                         self._make_cell(
                             header.value,
@@ -640,9 +646,11 @@ class Table:
                             duration_median,
                         )
                     )
+
                 row[-1].css += ' border-dark border-end'
                 row[-1].css.strip()
-            rows.append(row)
+            if is_user_results:
+                rows.append(row)
         return rows
 
     @staticmethod
@@ -667,8 +675,8 @@ class Table:
         user_duration: int | None,
         duration_median: float | None,
     ) -> Cell:
-        if ur is None:
-            return Cell(value='Нет результата', css='empty')
+        # if ur is None:
+        #     return Cell(value='Нет данных', css='empty', note='Нет данных')
 
         match header:
             case 'Лекция iSpring':
