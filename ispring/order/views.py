@@ -597,10 +597,13 @@ class TrackIvaFinalDataView(View):
                 'index': i,
                 'fio': row.fio,
                 'email': row.email or '',
-                'entry_time': row.entry_time.strftime('%d.%m.%Y %H:%M'),
-                'exit_time': row.exit_time.strftime('%d.%m.%Y %H:%M'),
+                'entry_time': row.entry_time.strftime('%d.%m.%Y %H:%M')
+                if row.entry_time
+                else '',
+                'exit_time': row.exit_time.strftime('%d.%m.%Y %H:%M')
+                if row.exit_time
+                else '',
                 'duration_minutes': int(row.duration.total_seconds() // 60),
-                # ←
                 'device': row.device,
                 'ip_address': row.ip_address,
                 'user_id_ispring': row.user_id_ispring,
@@ -702,6 +705,8 @@ class TrackIvaApplyView(View):
     def _parse_dt(value: str):
         from datetime import datetime
 
+        if len(value.strip()) == 0:
+            return None
         return datetime.strptime(' '.join(value.split()), '%d.%m.%Y %H:%M')
 
 
