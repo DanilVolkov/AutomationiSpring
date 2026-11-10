@@ -2,7 +2,6 @@ import csv
 import io
 import json
 import uuid
-from dataclasses import asdict
 from datetime import datetime, timedelta
 from io import BytesIO
 
@@ -195,11 +194,11 @@ class TrackDetailPartialView(View):
             learning_track = api.get_data_courses(track_id)
             table_html = None
             if learning_track:
-                with open('data_results.json', 'w', encoding='utf-8') as f:
-                    json.dump(
-                        asdict(learning_track), f, ensure_ascii=False,
-                        indent=4
-                    )
+                # with open('data_results.json', 'w', encoding='utf-8') as f:
+                #     json.dump(
+                #         asdict(learning_track), f, ensure_ascii=False,
+                #         indent=4
+                #     )
                 table = Table(learning_track)
                 cache.set('table', table)
                 table_html = table.to_html()
@@ -598,8 +597,12 @@ class TrackIvaFinalDataView(View):
                 'index': i,
                 'fio': row.fio,
                 'email': row.email or '',
-                'entry_time': row.entry_time.strftime('%d.%m.%Y %H:%M') if row.entry_time else '',
-                'exit_time': row.exit_time.strftime('%d.%m.%Y %H:%M') if row.exit_time else '',
+                'entry_time': row.entry_time.strftime('%d.%m.%Y %H:%M')
+                if row.entry_time
+                else '',
+                'exit_time': row.exit_time.strftime('%d.%m.%Y %H:%M')
+                if row.exit_time
+                else '',
                 'duration_minutes': int(row.duration.total_seconds() // 60),
                 'device': row.device,
                 'ip_address': row.ip_address,
@@ -701,6 +704,7 @@ class TrackIvaApplyView(View):
     @staticmethod
     def _parse_dt(value: str):
         from datetime import datetime
+
         if len(value.strip()) == 0:
             return None
         return datetime.strptime(' '.join(value.split()), '%d.%m.%Y %H:%M')

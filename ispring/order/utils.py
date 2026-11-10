@@ -407,8 +407,11 @@ class Table:
             header_top[i].colspan = max(colspan, 1)
 
         for row in rows:
-            new_row = [c for c in row if
-                       c.note in ['№', 'ФИО', 'Лекция итог', 'ДЗ итог']]
+            new_row = [
+                c
+                for c in row
+                if c.note in ['№', 'ФИО', 'Лекция итог', 'ДЗ итог']
+            ]
             new_rows.append(new_row)
         return header_top, new_header_bottom, new_rows
 
@@ -505,10 +508,11 @@ class Table:
         for course in self.track.courses:
             if not course.modules:
                 # Пустой курс — пустая ячейка в нижней шапке.
-                empty = Cell(value='',
-                             css='border-dark border-end border-bottom',
-                             note='end'
-                             )
+                empty = Cell(
+                    value='',
+                    css='border-dark border-end border-bottom',
+                    note='end',
+                )
                 header.append(empty)
                 course_headers[course.id].append(empty)
                 continue
@@ -675,9 +679,6 @@ class Table:
         user_duration: int | None,
         duration_median: float | None,
     ) -> Cell:
-        # if ur is None:
-        #     return Cell(value='Нет данных', css='empty', note='Нет данных')
-
         match header:
             case 'Лекция iSpring':
                 return Cell(value=Table._format_value(ur.progress))

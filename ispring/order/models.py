@@ -31,7 +31,9 @@ class Iva(models.Model):
     )
     course_id = models.UUIDField(verbose_name='ID курса')
     course_name = models.CharField(verbose_name='Название курса', blank=True)
-    user_id = models.UUIDField(verbose_name='ID пользователя')
+    user_id = models.UUIDField(
+        verbose_name='ID пользователя', blank=True, null=True
+    )
     fio = models.CharField(verbose_name='ФИО пользователя', blank=True)
     duration = models.IntegerField(verbose_name='Длительность')
     created_at = models.DateTimeField(
